@@ -25,7 +25,7 @@ import {
   skillsAfterPositionChange,
 } from "../game/constants.js";
 import { AppError } from "../middleware/error.js";
-import type { CreatePlayerInput } from "../validators/player.js";
+import type { CreatePlayerInput, UpdateTacticsInput } from "../validators/player.js";
 
 export type PlayerPublic = Omit<Player, never> & {
   skills: Record<SkillCode, number>;
@@ -321,6 +321,51 @@ export async function changePlayerPosition(
   });
 
   return toPublic(updated, skillRows, player.tactics);
+}
+
+export async function updatePlayerTactics(
+  userId: string,
+  input: UpdateTacticsInput,
+): Promise<PlayerPublic> {
+  const player = await db.query.players.findFirst({
+    where: eq(players.userId, userId),
+    with: { skills: true, tactics: true },
+  });
+
+  if (!player) {
+    throw new AppError(404, "No player found for this account", "NO_PLAYER");
+  }
+
+  if (!player.tactics) {
+    await db.insert(playerTactics).values({
+      playerId: player.id,
+      passingStyle: input.passingStyle,
+      foulIntensity: input.foulIntensity,
+    });
+  } else {
+    await db
+      .update(playerTactics)
+      .set({
+        passingStyle: input.passingStyle,
+        foulIntensity: input.foulIntensity,
+        updatedAt: new Date(),
+      })
+      .where(eq(playerTactics.playerId, player.id));
+  }
+
+  await db.insert(auditLogs).values({
+    actorUserId: userId,
+    action: "player.tactics_updated",
+    entityType: "player",
+    entityId: player.id,
+    metadata: input,
+  });
+
+  const tactics = await db.query.playerTactics.findFirst({
+    where: eq(playerTactics.playerId, player.id),
+  });
+
+  return toPublic(player, player.skills, tactics);
 }
 
 export async function listPlayersForAdmin(limit = 100, offset = 0) {

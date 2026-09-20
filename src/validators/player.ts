@@ -35,5 +35,11 @@ export const changePositionSchema = z.object({
   position: playerPositionSchema,
 });
 
+export const updateTacticsSchema = z.object({
+  passingStyle: z.enum(["conservative", "balanced", "risky"]),
+  foulIntensity: z.enum(["careful", "normal", "aggressive"]),
+});
+
 export type CreatePlayerInput = z.infer<typeof createPlayerSchema>;
 export type PlayerAppearanceInput = z.infer<typeof playerAppearanceSchema>;
+export type UpdateTacticsInput = z.infer<typeof updateTacticsSchema>;
