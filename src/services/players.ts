@@ -25,7 +25,11 @@ import {
   skillsAfterPositionChange,
 } from "../game/constants.js";
 import { AppError } from "../middleware/error.js";
-import type { CreatePlayerInput, UpdateTacticsInput } from "../validators/player.js";
+import type {
+  CreatePlayerInput,
+  UpdateAppearanceInput,
+  UpdateTacticsInput,
+} from "../validators/player.js";
 
 export type PlayerPublic = Omit<Player, never> & {
   skills: Record<SkillCode, number>;
@@ -414,6 +418,43 @@ export async function updatePlayerTactics(
   });
 
   return toPublic(player, player.skills, tactics);
+}
+
+export async function updatePlayerAppearance(
+  userId: string,
+  input: UpdateAppearanceInput,
+): Promise<PlayerPublic> {
+  const player = await db.query.players.findFirst({
+    where: eq(players.userId, userId),
+    with: { skills: true, tactics: true },
+  });
+
+  if (!player) {
+    throw new AppError(404, "No player found for this account", "NO_PLAYER");
+  }
+
+  const [updated] = await db
+    .update(players)
+    .set({
+      appearance: input,
+      updatedAt: new Date(),
+    })
+    .where(eq(players.id, player.id))
+    .returning();
+
+  await db.insert(auditLogs).values({
+    actorUserId: userId,
+    action: "player.appearance_updated",
+    entityType: "player",
+    entityId: player.id,
+    metadata: {
+      gender: input.gender,
+      skinToneId: input.skinToneId,
+      hairStyleId: input.hairStyleId,
+    },
+  });
+
+  return toPublic(updated, player.skills, player.tactics);
 }
 
 export async function listPlayersForAdmin(limit = 100, offset = 0) {

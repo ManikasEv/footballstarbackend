@@ -5,11 +5,13 @@ import {
   changePlayerPosition,
   createPlayerForUser,
   getPlayerByUserId,
+  updatePlayerAppearance,
   updatePlayerTactics,
 } from "../../services/players.js";
 import {
   changePositionSchema,
   createPlayerSchema,
+  updateAppearanceSchema,
   updateTacticsSchema,
 } from "../../validators/player.js";
 
@@ -63,6 +65,18 @@ playersRouter.patch("/me/tactics", async (req, res, next) => {
     const { user } = (req as AuthenticatedRequest).auth;
     const input = updateTacticsSchema.parse(req.body);
     const player = await updatePlayerTactics(user.id, input);
+
+    res.json({ data: player });
+  } catch (err) {
+    next(err);
+  }
+});
+
+playersRouter.patch("/me/appearance", async (req, res, next) => {
+  try {
+    const { user } = (req as AuthenticatedRequest).auth;
+    const input = updateAppearanceSchema.parse(req.body);
+    const player = await updatePlayerAppearance(user.id, input);
 
     res.json({ data: player });
   } catch (err) {

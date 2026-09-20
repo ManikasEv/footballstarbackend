@@ -191,6 +191,9 @@ export const updateTacticsSchema = z.object({
   foulIntensity: z.enum(["careful", "normal", "aggressive"]),
 });
 
+export const updateAppearanceSchema = playerAppearanceSchema;
+
 export type CreatePlayerInput = z.infer<typeof createPlayerSchema>;
 export type PlayerAppearanceInput = z.infer<typeof playerAppearanceSchema>;
 export type UpdateTacticsInput = z.infer<typeof updateTacticsSchema>;
+export type UpdateAppearanceInput = z.infer<typeof updateAppearanceSchema>;
