@@ -1,0 +1,11 @@
+-- Phase 1 schema is defined in src/db/schema.ts
+--
+-- IMPORTANT: If you previously pushed the early scaffold or the oversized
+-- Feature Bible stub schema, RESET the Neon database (or create a fresh branch)
+-- before pushing. Do not try to migrate in place.
+--
+-- Then from backend/:
+--   npm run db:push
+--   npm run dev
+--
+-- On first API boot, World 1 is created automatically.
