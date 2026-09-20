@@ -18,16 +18,20 @@ const helmet = (
 export function createApp() {
   const app = express();
 
-  const origins = (process.env.CORS_ORIGINS ?? "http://localhost:5173")
-    .split(",")
-    .map((o) => o.trim())
-    .filter(Boolean);
+  // Public game API: allow any origin by default (CORS_ORIGINS=* or unset).
+  // Optional allow-list: CORS_ORIGINS=https://game.example.com,https://crm.example.com
+  const corsEnv = (process.env.CORS_ORIGINS ?? "*").trim();
+  const allowAll = corsEnv === "" || corsEnv === "*";
+  const origin = allowAll
+    ? true
+    : corsEnv.split(",").map((o) => o.trim()).filter(Boolean);
 
   app.use(helmet());
   app.use(
     cors({
-      origin: origins,
-      credentials: true,
+      origin,
+      // Bearer tokens don't need cookies; false lets browsers accept any Origin cleanly
+      credentials: false,
     }),
   );
   app.use(express.json({ limit: "100kb" }));
