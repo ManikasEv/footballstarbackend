@@ -12,9 +12,8 @@ import {
 import { relations } from "drizzle-orm";
 
 /**
- * Phase 1 schema only.
- * Later phases (training, clubs, matches, …) get tables when that phase starts —
- * not as empty stubs.
+ * Phase 1 + Phase 2 (Training) schema.
+ * Later phases get tables only when that phase starts.
  */
 
 export const worldStatusEnum = pgEnum("world_status", [
@@ -54,6 +53,19 @@ export const skillCodeEnum = pgEnum("skill_code", [
   "GK_SHORT_SAVE",
   "GK_HEADER_SAVE",
   "GK_LONG_SAVE",
+]);
+
+export const trainingChainColorEnum = pgEnum("training_chain_color", [
+  "red",
+  "yellow",
+  "blue",
+  "green",
+]);
+
+export const trainingSessionStatusEnum = pgEnum("training_session_status", [
+  "active",
+  "completed",
+  "cancelled",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -214,6 +226,82 @@ export const playerSkillValues = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Phase 2 — Training
+// ---------------------------------------------------------------------------
+
+/** Three generated choices while idle. Cleared when a session starts. */
+export const trainingOffers = pgTable(
+  "training_offers",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    playerId: uuid("player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    skillCode: skillCodeEnum("skill_code").notNull(),
+    durationSeconds: integer("duration_seconds").notNull(),
+    enduranceCost: integer("endurance_cost").notNull(),
+    coinReward: integer("coin_reward").notNull(),
+    skillGain: integer("skill_gain").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [index("training_offers_player_id_idx").on(table.playerId)],
+);
+
+/** In-progress / finished training. Timer is server-authoritative. */
+export const trainingSessions = pgTable(
+  "training_sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    playerId: uuid("player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    skillCode: skillCodeEnum("skill_code").notNull(),
+    durationSeconds: integer("duration_seconds").notNull(),
+    enduranceCost: integer("endurance_cost").notNull(),
+    coinReward: integer("coin_reward").notNull(),
+    skillGain: integer("skill_gain").notNull(),
+    chainBonus: integer("chain_bonus").notNull().default(0),
+    status: trainingSessionStatusEnum("status").notNull().default("active"),
+    chainColor: trainingChainColorEnum("chain_color"),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("training_sessions_player_id_idx").on(table.playerId),
+    index("training_sessions_status_idx").on(table.status),
+  ],
+);
+
+/** Combo / chain progress for the player. */
+export const playerTrainingChain = pgTable(
+  "player_training_chain",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    playerId: uuid("player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    color: trainingChainColorEnum("color"),
+    nextIndex: integer("next_index").notNull().default(0),
+    consecutive: integer("consecutive").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("player_training_chain_player_id_uidx").on(table.playerId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Relations
 // ---------------------------------------------------------------------------
 
@@ -247,6 +335,12 @@ export const playersRelations = relations(players, ({ one, many }) => ({
     references: [playerTactics.playerId],
   }),
   skills: many(playerSkillValues),
+  trainingOffers: many(trainingOffers),
+  trainingSessions: many(trainingSessions),
+  trainingChain: one(playerTrainingChain, {
+    fields: [players.id],
+    references: [playerTrainingChain.playerId],
+  }),
 }));
 
 export const playerTacticsRelations = relations(playerTactics, ({ one }) => ({
@@ -273,6 +367,33 @@ export const adminUsersRelations = relations(adminUsers, ({ one }) => ({
   }),
 }));
 
+export const trainingOffersRelations = relations(trainingOffers, ({ one }) => ({
+  player: one(players, {
+    fields: [trainingOffers.playerId],
+    references: [players.id],
+  }),
+}));
+
+export const trainingSessionsRelations = relations(
+  trainingSessions,
+  ({ one }) => ({
+    player: one(players, {
+      fields: [trainingSessions.playerId],
+      references: [players.id],
+    }),
+  }),
+);
+
+export const playerTrainingChainRelations = relations(
+  playerTrainingChain,
+  ({ one }) => ({
+    player: one(players, {
+      fields: [playerTrainingChain.playerId],
+      references: [players.id],
+    }),
+  }),
+);
+
 export type User = typeof users.$inferSelect;
 export type Player = typeof players.$inferSelect;
 export type PlayerTactics = typeof playerTactics.$inferSelect;
@@ -280,5 +401,10 @@ export type PlayerSkillValue = typeof playerSkillValues.$inferSelect;
 export type AdminUser = typeof adminUsers.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type World = typeof worlds.$inferSelect;
+export type TrainingOffer = typeof trainingOffers.$inferSelect;
+export type TrainingSession = typeof trainingSessions.$inferSelect;
+export type PlayerTrainingChain = typeof playerTrainingChain.$inferSelect;
 export type PlayerPosition = (typeof playerPositionEnum.enumValues)[number];
 export type SkillCode = (typeof skillCodeEnum.enumValues)[number];
+export type TrainingChainColor =
+  (typeof trainingChainColorEnum.enumValues)[number];
