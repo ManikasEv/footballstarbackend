@@ -1,10 +1,13 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   auditLogs,
   playerSkillValues,
   playerTactics,
+  playerTrainingChain,
   players,
+  trainingOffers,
+  trainingSessions,
   type Player,
   type PlayerPosition,
   type PlayerSkillValue,
@@ -19,6 +22,7 @@ import {
   STARTING_POSITION_SKILL_BONUS,
   computePlayingStrength,
   nextUtcMidnight,
+  skillsAfterPositionChange,
 } from "../game/constants.js";
 import { AppError } from "../middleware/error.js";
 import type { CreatePlayerInput } from "../validators/player.js";
@@ -162,7 +166,7 @@ export async function createPlayerForUser(
         fame: 0,
         playingStrength,
         coins: 0,
-        stars: 0,
+        stars: 10,
         enduranceCurrent: 100,
         enduranceResetAt: nextUtcMidnight(),
         appearance: input.appearance,
@@ -219,7 +223,11 @@ export async function createPlayerForUser(
   }
 }
 
-/** Position is changeable; skills persist across switches. */
+/**
+ * Switch position: Fitness + Running keep their values.
+ * Other skills rebuild for the new role (relevant = start bonus, rest = base).
+ * Clears idle training offers and resets colour chain.
+ */
 export async function changePlayerPosition(
   userId: string,
   position: PlayerPosition,
@@ -238,8 +246,40 @@ export async function changePlayerPosition(
     return toPublic(refreshed, player.skills, player.tactics);
   }
 
-  const skills = skillsToMap(player.skills);
-  const playingStrength = computePlayingStrength(position, skills);
+  const busy = await db.query.trainingSessions.findFirst({
+    where: and(
+      eq(trainingSessions.playerId, player.id),
+      eq(trainingSessions.status, "active"),
+    ),
+  });
+
+  if (busy) {
+    throw new AppError(
+      409,
+      "Finish or wait out training before changing position",
+      "TRAINING_ACTIVE",
+    );
+  }
+
+  const currentMap = skillsToMap(player.skills);
+  const nextSkills = skillsAfterPositionChange(position, currentMap);
+  const playingStrength = computePlayingStrength(position, nextSkills);
+
+  for (const code of ALL_SKILL_CODES) {
+    const row = player.skills.find((s) => s.skillCode === code);
+    if (row) {
+      await db
+        .update(playerSkillValues)
+        .set({ value: nextSkills[code], updatedAt: new Date() })
+        .where(eq(playerSkillValues.id, row.id));
+    } else {
+      await db.insert(playerSkillValues).values({
+        playerId: player.id,
+        skillCode: code,
+        value: nextSkills[code],
+      });
+    }
+  }
 
   const [updated] = await db
     .update(players)
@@ -251,6 +291,18 @@ export async function changePlayerPosition(
     .where(eq(players.id, player.id))
     .returning();
 
+  await db.delete(trainingOffers).where(eq(trainingOffers.playerId, player.id));
+
+  await db
+    .update(playerTrainingChain)
+    .set({
+      color: null,
+      nextIndex: 0,
+      consecutive: 0,
+      updatedAt: new Date(),
+    })
+    .where(eq(playerTrainingChain.playerId, player.id));
+
   await db.insert(auditLogs).values({
     actorUserId: userId,
     action: "player.position_changed",
@@ -260,10 +312,15 @@ export async function changePlayerPosition(
       from: player.position,
       to: position,
       playingStrength,
+      keptGeneral: ["FITNESS", "RUNNING"],
     },
   });
 
-  return toPublic(updated, player.skills, player.tactics);
+  const skillRows = await db.query.playerSkillValues.findMany({
+    where: eq(playerSkillValues.playerId, player.id),
+  });
+
+  return toPublic(updated, skillRows, player.tactics);
 }
 
 export async function listPlayersForAdmin(limit = 100, offset = 0) {

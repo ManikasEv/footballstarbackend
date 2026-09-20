@@ -1,8 +1,8 @@
 import { Router } from "express";
 import type { AuthenticatedRequest } from "../../middleware/auth.js";
 import {
-  cancelTraining,
   claimTraining,
+  finishTrainingNow,
   getTrainingState,
   refreshTrainingOffers,
   startTraining,
@@ -42,10 +42,11 @@ trainingRouter.post("/start", async (req, res, next) => {
   }
 });
 
-trainingRouter.post("/cancel", async (req, res, next) => {
+/** Skip the timer — costs stars (premium), full rewards. */
+trainingRouter.post("/finish-now", async (req, res, next) => {
   try {
     const { user } = (req as AuthenticatedRequest).auth;
-    const data = await cancelTraining(user.id);
+    const data = await finishTrainingNow(user.id);
     res.json({ data });
   } catch (err) {
     next(err);

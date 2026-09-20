@@ -22,7 +22,7 @@ export const worldStatusEnum = pgEnum("world_status", [
   "closed",
 ]);
 
-/** Four classic roles. Position is changeable — not permanent. */
+/** Four classic roles. Locked at creation. */
 export const playerPositionEnum = pgEnum("player_position", [
   "goalkeeper",
   "defender",
@@ -66,6 +66,14 @@ export const trainingSessionStatusEnum = pgEnum("training_session_status", [
   "active",
   "completed",
   "cancelled",
+]);
+
+/** What the offer trains — focus skill vs all-round conditioning. */
+export const trainingOfferKindEnum = pgEnum("training_offer_kind", [
+  "drill",
+  "session",
+  "intensive",
+  "all_round",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -237,10 +245,13 @@ export const trainingOffers = pgTable(
     playerId: uuid("player_id")
       .notNull()
       .references(() => players.id, { onDelete: "cascade" }),
-    skillCode: skillCodeEnum("skill_code").notNull(),
+    kind: trainingOfferKindEnum("kind").notNull().default("session"),
+    /** Null when kind is all_round. */
+    skillCode: skillCodeEnum("skill_code"),
     durationSeconds: integer("duration_seconds").notNull(),
     enduranceCost: integer("endurance_cost").notNull(),
     coinReward: integer("coin_reward").notNull(),
+    /** Points to the focus skill, or to every skill when all_round. */
     skillGain: integer("skill_gain").notNull(),
     sortOrder: integer("sort_order").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -258,7 +269,9 @@ export const trainingSessions = pgTable(
     playerId: uuid("player_id")
       .notNull()
       .references(() => players.id, { onDelete: "cascade" }),
-    skillCode: skillCodeEnum("skill_code").notNull(),
+    kind: trainingOfferKindEnum("kind").notNull().default("session"),
+    /** Null when kind is all_round. */
+    skillCode: skillCodeEnum("skill_code"),
     durationSeconds: integer("duration_seconds").notNull(),
     enduranceCost: integer("endurance_cost").notNull(),
     coinReward: integer("coin_reward").notNull(),
@@ -408,3 +421,5 @@ export type PlayerPosition = (typeof playerPositionEnum.enumValues)[number];
 export type SkillCode = (typeof skillCodeEnum.enumValues)[number];
 export type TrainingChainColor =
   (typeof trainingChainColorEnum.enumValues)[number];
+export type TrainingOfferKind =
+  (typeof trainingOfferKindEnum.enumValues)[number];

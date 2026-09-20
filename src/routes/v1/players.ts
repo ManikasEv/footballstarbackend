@@ -40,7 +40,10 @@ playersRouter.post("/", async (req, res, next) => {
   }
 });
 
-/** Position can be changed whenever the player wants (Feature Bible). */
+/**
+ * Position can change. Fitness + Running keep values;
+ * other skills rebuild for the new role.
+ */
 playersRouter.patch("/me/position", async (req, res, next) => {
   try {
     const { user } = (req as AuthenticatedRequest).auth;

@@ -1,6 +1,6 @@
 import type { PlayerPosition, SkillCode } from "../db/schema.js";
 
-/** All skill codes stored per player so position switches keep trained values. */
+/** All skill codes stored per player (position skills drive Playing Strength). */
 export const ALL_SKILL_CODES: SkillCode[] = [
   "PASSING",
   "FITNESS",
@@ -52,6 +52,36 @@ export const POSITION_SKILLS: Record<PlayerPosition, SkillCode[]> = {
   ],
   striker: ["DRIBBLING", "FINISHING", "PASSING", "RUNNING", "FITNESS"],
 };
+
+/** Skills that survive a position change (general athleticism). */
+export const GENERAL_SKILLS: SkillCode[] = ["FITNESS", "RUNNING"];
+
+/**
+ * Values after switching position:
+ * - general skills keep trained values
+ * - new role’s relevant skills start fresh (base + bonus)
+ * - everything else resets to base
+ */
+export function skillsAfterPositionChange(
+  newPosition: PlayerPosition,
+  current: Partial<Record<SkillCode, number>>,
+): Record<SkillCode, number> {
+  const general = new Set(GENERAL_SKILLS);
+  const relevant = new Set(POSITION_SKILLS[newPosition]);
+  const next = {} as Record<SkillCode, number>;
+
+  for (const code of ALL_SKILL_CODES) {
+    if (general.has(code)) {
+      next[code] = current[code] ?? BASE_SKILL_VALUE;
+    } else if (relevant.has(code)) {
+      next[code] = BASE_SKILL_VALUE + STARTING_POSITION_SKILL_BONUS;
+    } else {
+      next[code] = BASE_SKILL_VALUE;
+    }
+  }
+
+  return next;
+}
 
 /**
  * Placeholder Playing Strength until equipment/nutrition/club bonuses exist.

@@ -10,6 +10,7 @@ import {
   type Player,
   type SkillCode,
   type TrainingOffer,
+  type TrainingOfferKind,
   type TrainingSession,
 } from "../db/schema.js";
 import {
@@ -71,22 +72,35 @@ async function clearOffers(playerId: string) {
   await db.delete(trainingOffers).where(eq(trainingOffers.playerId, playerId));
 }
 
+/** Old packs were flat 600s / identical durations — drop them. */
+function offersLookLegacy(offers: TrainingOffer[]) {
+  if (offers.length < 3) return true;
+  const kindsMissing = offers.some((o) => o.kind == null);
+  if (kindsMissing) return true;
+  const allSameDuration = offers.every(
+    (o) => o.durationSeconds === offers[0].durationSeconds,
+  );
+  return allSameDuration && offers[0].durationSeconds >= 500;
+}
+
 async function ensureOffers(player: Player): Promise<TrainingOffer[]> {
   const existing = await db.query.trainingOffers.findMany({
     where: eq(trainingOffers.playerId, player.id),
     orderBy: [asc(trainingOffers.sortOrder)],
   });
-  if (existing.length >= 3) {
+
+  if (existing.length >= 3 && !offersLookLegacy(existing)) {
     return existing.slice(0, 3);
   }
 
   await clearOffers(player.id);
-  const generated = generateTrainingOffers(player.position);
+  const generated = generateTrainingOffers(player.position, player.fame);
   const inserted = await db
     .insert(trainingOffers)
     .values(
       generated.map((o) => ({
         playerId: player.id,
+        kind: o.kind,
         skillCode: o.skillCode,
         durationSeconds: o.durationSeconds,
         enduranceCost: o.enduranceCost,
@@ -110,7 +124,10 @@ async function findActiveSession(playerId: string) {
   });
 }
 
-async function recomputePlayingStrength(playerId: string, position: Player["position"]) {
+async function recomputePlayingStrength(
+  playerId: string,
+  position: Player["position"],
+) {
   const skillRows = await db.query.playerSkillValues.findMany({
     where: eq(playerSkillValues.playerId, playerId),
   });
@@ -131,12 +148,44 @@ async function recomputePlayingStrength(playerId: string, position: Player["posi
 
 type CompletionResult = {
   session: TrainingSession;
-  skillCode: SkillCode;
+  kind: TrainingOfferKind;
+  skillCode: SkillCode | null;
   skillGain: number;
   chainBonus: number;
   coinReward: number;
-  newSkillValue: number;
+  newSkillValue: number | null;
+  appliedToAll: boolean;
 };
+
+async function bumpSkill(
+  playerId: string,
+  skillCode: SkillCode,
+  amount: number,
+): Promise<number> {
+  const skillRow = await db.query.playerSkillValues.findFirst({
+    where: and(
+      eq(playerSkillValues.playerId, playerId),
+      eq(playerSkillValues.skillCode, skillCode),
+    ),
+  });
+
+  const newValue = (skillRow?.value ?? 10) + amount;
+
+  if (skillRow) {
+    await db
+      .update(playerSkillValues)
+      .set({ value: newValue, updatedAt: new Date() })
+      .where(eq(playerSkillValues.id, skillRow.id));
+  } else {
+    await db.insert(playerSkillValues).values({
+      playerId,
+      skillCode,
+      value: newValue,
+    });
+  }
+
+  return newValue;
+}
 
 async function completeSession(
   session: TrainingSession,
@@ -146,28 +195,21 @@ async function completeSession(
     throw new AppError(400, "Training session is not active", "NOT_ACTIVE");
   }
 
-  const totalGain = session.skillGain + session.chainBonus;
+  const kind = (session.kind ?? "session") as TrainingOfferKind;
+  const appliedToAll = kind === "all_round" || session.skillCode == null;
+  let newSkillValue: number | null = null;
 
-  const skillRow = await db.query.playerSkillValues.findFirst({
-    where: and(
-      eq(playerSkillValues.playerId, player.id),
-      eq(playerSkillValues.skillCode, session.skillCode),
-    ),
-  });
-
-  const newSkillValue = (skillRow?.value ?? 10) + totalGain;
-
-  if (skillRow) {
-    await db
-      .update(playerSkillValues)
-      .set({ value: newSkillValue, updatedAt: new Date() })
-      .where(eq(playerSkillValues.id, skillRow.id));
+  if (appliedToAll) {
+    for (const code of ALL_SKILL_CODES) {
+      await bumpSkill(player.id, code, session.skillGain);
+    }
   } else {
-    await db.insert(playerSkillValues).values({
-      playerId: player.id,
-      skillCode: session.skillCode,
-      value: newSkillValue,
-    });
+    const totalGain = session.skillGain + session.chainBonus;
+    newSkillValue = await bumpSkill(
+      player.id,
+      session.skillCode as SkillCode,
+      totalGain,
+    );
   }
 
   await db
@@ -195,30 +237,34 @@ async function completeSession(
     entityType: "training_session",
     entityId: session.id,
     metadata: {
+      kind,
       skillCode: session.skillCode,
       skillGain: session.skillGain,
       chainBonus: session.chainBonus,
       coinReward: session.coinReward,
+      appliedToAll,
       newSkillValue,
     },
   });
 
-  // New offers after completion
   await clearOffers(player.id);
 
   return {
     session: updatedSession,
+    kind,
     skillCode: session.skillCode,
     skillGain: session.skillGain,
     chainBonus: session.chainBonus,
     coinReward: session.coinReward,
     newSkillValue,
+    appliedToAll,
   };
 }
 
 function serializeOffer(o: TrainingOffer) {
   return {
     id: o.id,
+    kind: o.kind,
     skillCode: o.skillCode,
     durationSeconds: o.durationSeconds,
     enduranceCost: o.enduranceCost,
@@ -231,8 +277,10 @@ function serializeOffer(o: TrainingOffer) {
 function serializeSession(s: TrainingSession) {
   const now = Date.now();
   const endsAtMs = s.endsAt.getTime();
+  const remainingSeconds = Math.max(0, Math.ceil((endsAtMs - now) / 1000));
   return {
     id: s.id,
+    kind: s.kind,
     skillCode: s.skillCode,
     durationSeconds: s.durationSeconds,
     enduranceCost: s.enduranceCost,
@@ -244,8 +292,15 @@ function serializeSession(s: TrainingSession) {
     startedAt: s.startedAt.toISOString(),
     endsAt: s.endsAt.toISOString(),
     completedAt: s.completedAt?.toISOString() ?? null,
-    remainingSeconds: Math.max(0, Math.ceil((endsAtMs - now) / 1000)),
+    remainingSeconds,
+    finishNowStarCost: finishNowStarCost(remainingSeconds),
   };
+}
+
+/** Stars to skip the wait — scales with time left (not coins). */
+export function finishNowStarCost(remainingSeconds: number) {
+  if (remainingSeconds <= 0) return 0;
+  return Math.max(1, Math.ceil(remainingSeconds / 90));
 }
 
 export async function getTrainingState(userId: string) {
@@ -283,11 +338,13 @@ export async function getTrainingState(userId: string) {
     },
     lastCompletion: lastCompletion
       ? {
+          kind: lastCompletion.kind,
           skillCode: lastCompletion.skillCode,
           skillGain: lastCompletion.skillGain,
           chainBonus: lastCompletion.chainBonus,
           coinReward: lastCompletion.coinReward,
           newSkillValue: lastCompletion.newSkillValue,
+          appliedToAll: lastCompletion.appliedToAll,
         }
       : null,
   };
@@ -349,16 +406,28 @@ export async function startTraining(userId: string, offerId: string) {
     );
   }
 
+  const kind = (offer.kind ?? "session") as TrainingOfferKind;
   const chain = await ensureChainRow(player.id);
-  const advance = advanceTrainingChain(
-    player.position,
-    {
-      color: (chain.color as ChainColor | null) ?? null,
-      nextIndex: chain.nextIndex,
-      consecutive: chain.consecutive,
-    },
-    offer.skillCode,
-  );
+
+  // All-round does not feed colour chains
+  const advance =
+    kind === "all_round" || offer.skillCode == null
+      ? {
+          color: null as ChainColor | null,
+          nextIndex: 0,
+          consecutive: 0,
+          chainBonus: 0,
+          matched: false,
+        }
+      : advanceTrainingChain(
+          player.position,
+          {
+            color: (chain.color as ChainColor | null) ?? null,
+            nextIndex: chain.nextIndex,
+            consecutive: chain.consecutive,
+          },
+          offer.skillCode,
+        );
 
   const now = new Date();
   const endsAt = new Date(now.getTime() + offer.durationSeconds * 1000);
@@ -372,20 +441,23 @@ export async function startTraining(userId: string, offerId: string) {
     .where(eq(players.id, player.id))
     .returning();
 
-  await db
-    .update(playerTrainingChain)
-    .set({
-      color: advance.color,
-      nextIndex: advance.nextIndex,
-      consecutive: advance.consecutive,
-      updatedAt: now,
-    })
-    .where(eq(playerTrainingChain.playerId, player.id));
+  if (kind !== "all_round" && offer.skillCode != null) {
+    await db
+      .update(playerTrainingChain)
+      .set({
+        color: advance.color,
+        nextIndex: advance.nextIndex,
+        consecutive: advance.consecutive,
+        updatedAt: now,
+      })
+      .where(eq(playerTrainingChain.playerId, player.id));
+  }
 
   const [session] = await db
     .insert(trainingSessions)
     .values({
       playerId: player.id,
+      kind,
       skillCode: offer.skillCode,
       durationSeconds: offer.durationSeconds,
       enduranceCost: offer.enduranceCost,
@@ -407,11 +479,15 @@ export async function startTraining(userId: string, offerId: string) {
     entityType: "training_session",
     entityId: session.id,
     metadata: {
+      kind,
       skillCode: offer.skillCode,
       enduranceCost: offer.enduranceCost,
+      durationSeconds: offer.durationSeconds,
+      skillGain: offer.skillGain,
       chainBonus: advance.chainBonus,
       chainColor: advance.color,
       consecutive: advance.consecutive,
+      fame: player.fame,
     },
   });
 
@@ -432,7 +508,7 @@ export async function startTraining(userId: string, offerId: string) {
   };
 }
 
-export async function cancelTraining(userId: string) {
+export async function finishTrainingNow(userId: string) {
   const player = await getPlayerRow(userId);
   const active = await findActiveSession(player.id);
 
@@ -440,34 +516,48 @@ export async function cancelTraining(userId: string) {
     throw new AppError(404, "No active training", "NO_ACTIVE_TRAINING");
   }
 
-  // Partial endurance refund (50%), no skill/coin rewards
-  const refund = Math.floor(active.enduranceCost / 2);
-  const newEndurance = Math.min(100, player.enduranceCurrent + refund);
+  const remainingSeconds = Math.max(
+    0,
+    Math.ceil((active.endsAt.getTime() - Date.now()) / 1000),
+  );
 
-  await db
-    .update(trainingSessions)
-    .set({
-      status: "cancelled",
-      completedAt: new Date(),
-    })
-    .where(eq(trainingSessions.id, active.id));
+  if (remainingSeconds <= 0) {
+    await completeSession(active, player);
+    return getTrainingState(userId);
+  }
 
-  await db
+  const starCost = finishNowStarCost(remainingSeconds);
+  if (player.stars < starCost) {
+    throw new AppError(
+      400,
+      `Need ${starCost} stars to finish now`,
+      "INSUFFICIENT_STARS",
+    );
+  }
+
+  const [updatedPlayer] = await db
     .update(players)
     .set({
-      enduranceCurrent: newEndurance,
+      stars: player.stars - starCost,
       updatedAt: new Date(),
     })
-    .where(eq(players.id, player.id));
+    .where(eq(players.id, player.id))
+    .returning();
 
   await db.insert(auditLogs).values({
     actorUserId: userId,
-    action: "training.cancelled",
+    action: "training.finish_now",
     entityType: "training_session",
     entityId: active.id,
-    metadata: { refund },
+    metadata: {
+      starCost,
+      remainingSeconds,
+      starsBefore: player.stars,
+      starsAfter: updatedPlayer.stars,
+    },
   });
 
+  await completeSession(active, updatedPlayer);
   return getTrainingState(userId);
 }
 
