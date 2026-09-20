@@ -43,16 +43,30 @@ export const foulIntensityEnum = pgEnum("foul_intensity", [
 ]);
 
 export const skillCodeEnum = pgEnum("skill_code", [
-  "PASSING",
   "FITNESS",
+  "RUNNING",
+  "PASSING",
+  "STRENGTH",
   "DRIBBLING",
   "TACKLING",
   "INTERCEPTION",
   "FINISHING",
-  "RUNNING",
+  "HEADING",
+  "MARKING",
+  "CLEARANCE",
+  "SLIDING",
+  "CROSSING",
+  "VISION",
+  "LONG_SHOTS",
+  "FIRST_TOUCH",
+  "SHOT_POWER",
+  "OFF_BALL",
   "GK_SHORT_SAVE",
-  "GK_HEADER_SAVE",
   "GK_LONG_SAVE",
+  "GK_HEADER_SAVE",
+  "GK_ONE_ON_ONE",
+  "GK_REFLEXES",
+  "GK_COMMAND",
 ]);
 
 export const trainingChainColorEnum = pgEnum("training_chain_color", [

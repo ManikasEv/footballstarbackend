@@ -152,7 +152,7 @@ function buildOffer(
 
 /**
  * Three offers for this player: mixed kinds, fame-scaled time & gains.
- * Focus offers use position-relevant skills; all_round hits every skill.
+ * Focus offers use the position’s 10 skills; all_round hits those 10.
  */
 export function generateTrainingOffers(
   position: PlayerPosition,

@@ -5,7 +5,7 @@ export type ChainColor = "red" | "yellow" | "blue" | "green";
 export const CHAIN_COLORS: ChainColor[] = ["red", "yellow", "blue", "green"];
 
 /**
- * Position training sequences (Feature Bible §10).
+ * Position training sequences — steps drawn from that class’s 10 skills.
  * Following consecutive correct steps awards chain bonuses.
  */
 export const TRAINING_CHAINS: Record<
@@ -13,28 +13,52 @@ export const TRAINING_CHAINS: Record<
   Record<ChainColor, SkillCode[]>
 > = {
   goalkeeper: {
-    red: ["PASSING", "GK_SHORT_SAVE", "GK_LONG_SAVE", "GK_HEADER_SAVE", "FITNESS"],
-    yellow: ["GK_HEADER_SAVE", "PASSING", "GK_LONG_SAVE", "FITNESS", "GK_SHORT_SAVE"],
-    blue: ["GK_LONG_SAVE", "PASSING", "GK_HEADER_SAVE", "GK_SHORT_SAVE", "FITNESS"],
-    green: ["GK_SHORT_SAVE", "PASSING", "FITNESS", "GK_HEADER_SAVE", "GK_LONG_SAVE"],
+    red: [
+      "GK_SHORT_SAVE",
+      "PASSING",
+      "GK_REFLEXES",
+      "FITNESS",
+      "GK_ONE_ON_ONE",
+    ],
+    yellow: [
+      "GK_LONG_SAVE",
+      "STRENGTH",
+      "GK_HEADER_SAVE",
+      "RUNNING",
+      "GK_COMMAND",
+    ],
+    blue: [
+      "GK_REFLEXES",
+      "GK_SHORT_SAVE",
+      "PASSING",
+      "GK_LONG_SAVE",
+      "FITNESS",
+    ],
+    green: [
+      "GK_ONE_ON_ONE",
+      "GK_COMMAND",
+      "RUNNING",
+      "GK_HEADER_SAVE",
+      "STRENGTH",
+    ],
   },
   defender: {
-    red: ["DRIBBLING", "INTERCEPTION", "PASSING", "TACKLING", "FITNESS"],
-    yellow: ["TACKLING", "DRIBBLING", "PASSING", "FITNESS", "INTERCEPTION"],
-    blue: ["PASSING", "DRIBBLING", "TACKLING", "INTERCEPTION", "FITNESS"],
-    green: ["INTERCEPTION", "DRIBBLING", "FITNESS", "TACKLING", "PASSING"],
+    red: ["TACKLING", "PASSING", "MARKING", "FITNESS", "INTERCEPTION"],
+    yellow: ["HEADING", "STRENGTH", "CLEARANCE", "RUNNING", "SLIDING"],
+    blue: ["MARKING", "TACKLING", "PASSING", "HEADING", "FITNESS"],
+    green: ["INTERCEPTION", "SLIDING", "CLEARANCE", "STRENGTH", "RUNNING"],
   },
   midfielder: {
-    red: ["FINISHING", "PASSING", "INTERCEPTION", "FITNESS", "DRIBBLING"],
-    yellow: ["DRIBBLING", "PASSING", "FITNESS", "FINISHING", "INTERCEPTION"],
-    blue: ["FITNESS", "PASSING", "DRIBBLING", "INTERCEPTION", "FINISHING"],
-    green: ["INTERCEPTION", "PASSING", "FINISHING", "DRIBBLING", "FITNESS"],
+    red: ["DRIBBLING", "PASSING", "VISION", "FITNESS", "CROSSING"],
+    yellow: ["FINISHING", "LONG_SHOTS", "INTERCEPTION", "RUNNING", "STRENGTH"],
+    blue: ["VISION", "DRIBBLING", "PASSING", "FINISHING", "FITNESS"],
+    green: ["CROSSING", "INTERCEPTION", "LONG_SHOTS", "STRENGTH", "RUNNING"],
   },
   striker: {
-    red: ["DRIBBLING", "FINISHING", "PASSING", "RUNNING", "FITNESS"],
-    yellow: ["RUNNING", "DRIBBLING", "PASSING", "FITNESS", "FINISHING"],
-    blue: ["PASSING", "DRIBBLING", "RUNNING", "FINISHING", "FITNESS"],
-    green: ["FINISHING", "DRIBBLING", "FITNESS", "RUNNING", "PASSING"],
+    red: ["FINISHING", "DRIBBLING", "SHOT_POWER", "FITNESS", "OFF_BALL"],
+    yellow: ["FIRST_TOUCH", "HEADING", "PASSING", "RUNNING", "STRENGTH"],
+    blue: ["DRIBBLING", "FINISHING", "OFF_BALL", "SHOT_POWER", "FITNESS"],
+    green: ["SHOT_POWER", "FIRST_TOUCH", "HEADING", "RUNNING", "PASSING"],
   },
 };
 

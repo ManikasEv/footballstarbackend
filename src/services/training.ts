@@ -15,6 +15,7 @@ import {
 } from "../db/schema.js";
 import {
   ALL_SKILL_CODES,
+  POSITION_SKILLS,
   computePlayingStrength,
   nextUtcMidnight,
 } from "../game/constants.js";
@@ -200,7 +201,7 @@ async function completeSession(
   let newSkillValue: number | null = null;
 
   if (appliedToAll) {
-    for (const code of ALL_SKILL_CODES) {
+    for (const code of POSITION_SKILLS[player.position]) {
       await bumpSkill(player.id, code, session.skillGain);
     }
   } else {

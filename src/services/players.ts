@@ -96,7 +96,26 @@ export async function getPlayerByUserId(
   }
 
   const refreshed = await applyEnduranceResetIfDue(player);
-  return toPublic(refreshed, player.skills, player.tactics);
+  const skillRows = await ensureSkillRows(
+    player.id,
+    player.position,
+    player.skills,
+  );
+
+  // Recompute PS if skill set grew (new codes) or legacy 5-skill PS drifted
+  const map = skillsToMap(skillRows);
+  const playingStrength = computePlayingStrength(player.position, map);
+  let playerRow = refreshed;
+  if (playingStrength !== refreshed.playingStrength) {
+    const [updated] = await db
+      .update(players)
+      .set({ playingStrength, updatedAt: new Date() })
+      .where(eq(players.id, player.id))
+      .returning();
+    playerRow = updated ?? refreshed;
+  }
+
+  return toPublic(playerRow, skillRows, player.tactics);
 }
 
 function buildInitialSkillRows(playerId: string, position: PlayerPosition) {
@@ -108,6 +127,35 @@ function buildInitialSkillRows(playerId: string, position: PlayerPosition) {
       ? BASE_SKILL_VALUE + STARTING_POSITION_SKILL_BONUS
       : BASE_SKILL_VALUE,
   }));
+}
+
+/** Backfill any newly added skill codes for existing players. */
+async function ensureSkillRows(
+  playerId: string,
+  position: PlayerPosition,
+  existing: PlayerSkillValue[],
+): Promise<PlayerSkillValue[]> {
+  const have = new Set(existing.map((r) => r.skillCode));
+  const missing = ALL_SKILL_CODES.filter((code) => !have.has(code));
+  if (missing.length === 0) {
+    return existing;
+  }
+
+  const relevant = new Set(POSITION_SKILLS[position]);
+  const inserted = await db
+    .insert(playerSkillValues)
+    .values(
+      missing.map((skillCode) => ({
+        playerId,
+        skillCode,
+        value: relevant.has(skillCode)
+          ? BASE_SKILL_VALUE + STARTING_POSITION_SKILL_BONUS
+          : BASE_SKILL_VALUE,
+      })),
+    )
+    .returning();
+
+  return [...existing, ...inserted];
 }
 
 function isUniqueViolation(err: unknown): boolean {
@@ -224,8 +272,8 @@ export async function createPlayerForUser(
 }
 
 /**
- * Switch position: Fitness + Running keep their values.
- * Other skills rebuild for the new role (relevant = start bonus, rest = base).
+ * Switch position: 4 general skills keep their values.
+ * Class skills rebuild for the new role.
  * Clears idle training offers and resets colour chain.
  */
 export async function changePlayerPosition(
