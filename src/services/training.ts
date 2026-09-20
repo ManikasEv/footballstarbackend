@@ -192,6 +192,21 @@ async function completeSession(
   session: TrainingSession,
   player: Player,
 ): Promise<CompletionResult> {
+  // Idempotent — claim + GET auto-complete can race
+  if (session.status === "completed") {
+    return {
+      session,
+      kind: (session.kind ?? "session") as TrainingOfferKind,
+      skillCode: session.skillCode,
+      skillGain: session.skillGain,
+      chainBonus: session.chainBonus,
+      coinReward: session.coinReward,
+      newSkillValue: null,
+      appliedToAll:
+        (session.kind ?? "session") === "all_round" || session.skillCode == null,
+    };
+  }
+
   if (session.status !== "active") {
     throw new AppError(400, "Training session is not active", "NOT_ACTIVE");
   }
@@ -567,6 +582,7 @@ export async function claimTraining(userId: string) {
   const active = await findActiveSession(player.id);
 
   if (!active) {
+    // Already claimed / auto-completed — still return fresh skills
     return getTrainingState(userId);
   }
 
@@ -578,6 +594,16 @@ export async function claimTraining(userId: string) {
     );
   }
 
-  await completeSession(active, player);
+  try {
+    await completeSession(active, player);
+  } catch (err) {
+    // Parallel GET may have completed it first
+    if (
+      !(err instanceof AppError) ||
+      err.code !== "NOT_ACTIVE"
+    ) {
+      throw err;
+    }
+  }
   return getTrainingState(userId);
 }
