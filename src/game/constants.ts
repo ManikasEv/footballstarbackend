@@ -4,6 +4,7 @@ import type { PlayerPosition, SkillCode } from "../db/schema.js";
  * Skill model (mature SoccerStar-style):
  * - 4 general skills — same for every class, kept on position change
  * - 6 class skills — unique set per position, rebuild on position change
+ * - Skills are **uncapped** (no 100 ceiling); UI bars wrap every 100 pts
  * Playing Strength = sum of the 10 (4 + 6) for the current position.
  */
 
