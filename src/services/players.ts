@@ -20,8 +20,8 @@ import {
   BASE_SKILL_VALUE,
   POSITION_SKILLS,
   STARTING_POSITION_SKILL_BONUS,
+  applyEnduranceRegen,
   computePlayingStrength,
-  nextUtcMidnight,
   skillsAfterPositionChange,
 } from "../game/constants.js";
 import { AppError } from "../middleware/error.js";
@@ -64,18 +64,23 @@ function toPublic(
   };
 }
 
-/** Mature rule: at UTC midnight, endurance resets to 100. No passive regen. */
+/** Apply accrued +1/min endurance regen and persist when gained. */
 async function applyEnduranceResetIfDue(player: Player): Promise<Player> {
   const now = new Date();
-  if (now < player.enduranceResetAt) {
+  const next = applyEnduranceRegen(
+    player.enduranceCurrent,
+    player.enduranceResetAt,
+    now,
+  );
+  if (!next.changed) {
     return player;
   }
 
   const [updated] = await db
     .update(players)
     .set({
-      enduranceCurrent: 100,
-      enduranceResetAt: nextUtcMidnight(now),
+      enduranceCurrent: next.enduranceCurrent,
+      enduranceResetAt: next.lastTickAt,
       updatedAt: now,
     })
     .where(eq(players.id, player.id))
@@ -220,7 +225,7 @@ export async function createPlayerForUser(
         coins: 0,
         stars: 10,
         enduranceCurrent: 100,
-        enduranceResetAt: nextUtcMidnight(),
+        enduranceResetAt: new Date(),
         appearance: input.appearance,
       })
       .returning();

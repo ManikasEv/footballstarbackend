@@ -16,8 +16,8 @@ import {
 import {
   ALL_SKILL_CODES,
   POSITION_SKILLS,
+  applyEnduranceRegen,
   computePlayingStrength,
-  nextUtcMidnight,
 } from "../game/constants.js";
 import {
   advanceTrainingChain,
@@ -30,14 +30,19 @@ import { getPlayerByUserId } from "./players.js";
 
 async function applyEnduranceReset(player: Player): Promise<Player> {
   const now = new Date();
-  if (now < player.enduranceResetAt) {
+  const next = applyEnduranceRegen(
+    player.enduranceCurrent,
+    player.enduranceResetAt,
+    now,
+  );
+  if (!next.changed) {
     return player;
   }
   const [updated] = await db
     .update(players)
     .set({
-      enduranceCurrent: 100,
-      enduranceResetAt: nextUtcMidnight(now),
+      enduranceCurrent: next.enduranceCurrent,
+      enduranceResetAt: next.lastTickAt,
       updatedAt: now,
     })
     .where(eq(players.id, player.id))
@@ -452,6 +457,8 @@ export async function startTraining(userId: string, offerId: string) {
     .update(players)
     .set({
       enduranceCurrent: player.enduranceCurrent - offer.enduranceCost,
+      // Regen clock starts from spend so +1/min resumes from here
+      enduranceResetAt: now,
       updatedAt: now,
     })
     .where(eq(players.id, player.id))

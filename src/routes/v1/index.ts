@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
 import { adminRouter } from "./admin.js";
+import { economyRouter } from "./economy.js";
 import { meRouter } from "./me.js";
 import { playersRouter } from "./players.js";
 import { trainingRouter } from "./training.js";
@@ -20,4 +21,5 @@ v1Router.get("/health", (_req, res) => {
 v1Router.use("/me", requireAuth, meRouter);
 v1Router.use("/players", requireAuth, playersRouter);
 v1Router.use("/training", requireAuth, trainingRouter);
+v1Router.use("/economy", requireAuth, economyRouter);
 v1Router.use("/admin", adminRouter);

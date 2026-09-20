@@ -200,7 +200,7 @@ export const players = pgTable(
     coins: integer("coins").notNull().default(0),
     stars: integer("stars").notNull().default(0),
     enduranceCurrent: integer("endurance_current").notNull().default(100),
-    /** Next UTC midnight for mature endurance reset (no passive regen). */
+    /** Last endurance regen tick (+1 per minute while below 100). */
     enduranceResetAt: timestamp("endurance_reset_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

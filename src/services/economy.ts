@@ -1,0 +1,306 @@
+import { and, eq } from "drizzle-orm";
+import { db } from "../db/index.js";
+import {
+  auditLogs,
+  playerSkillValues,
+  players,
+  type Player,
+  type SkillCode,
+} from "../db/schema.js";
+import {
+  ENDURANCE_MAX,
+  POSITION_SKILLS,
+  applyEnduranceRegen,
+  computePlayingStrength,
+} from "../game/constants.js";
+import {
+  FITNESS_ITEMS,
+  SHOP_ITEMS,
+  STAR_PACKS,
+  WORK_JOBS,
+} from "../game/economyCatalog.js";
+import { AppError } from "../middleware/error.js";
+import { getPlayerByUserId, type PlayerPublic } from "./players.js";
+
+async function loadPlayer(userId: string): Promise<Player> {
+  const row = await db.query.players.findFirst({
+    where: eq(players.userId, userId),
+  });
+  if (!row) {
+    throw new AppError(404, "Player not found", "PLAYER_NOT_FOUND");
+  }
+  const now = new Date();
+  const regen = applyEnduranceRegen(
+    row.enduranceCurrent,
+    row.enduranceResetAt,
+    now,
+  );
+  if (!regen.changed) return row;
+  const [updated] = await db
+    .update(players)
+    .set({
+      enduranceCurrent: regen.enduranceCurrent,
+      enduranceResetAt: regen.lastTickAt,
+      updatedAt: now,
+    })
+    .where(eq(players.id, row.id))
+    .returning();
+  return updated ?? row;
+}
+
+function appearanceRecord(player: Player): Record<string, unknown> {
+  const a = player.appearance;
+  return a && typeof a === "object" ? { ...(a as Record<string, unknown>) } : {};
+}
+
+function unlockedHairIds(player: Player): string[] {
+  const raw = appearanceRecord(player).unlockedHairIds;
+  return Array.isArray(raw) ? raw.map(String) : [];
+}
+
+export function getEconomyCatalog() {
+  return {
+    work: WORK_JOBS,
+    shop: SHOP_ITEMS,
+    fitness: FITNESS_ITEMS,
+    stars: STAR_PACKS,
+  };
+}
+
+export async function completeWorkJob(
+  userId: string,
+  jobId: string,
+): Promise<PlayerPublic> {
+  const job = WORK_JOBS.find((j) => j.id === jobId);
+  if (!job) {
+    throw new AppError(404, "Job not found", "JOB_NOT_FOUND");
+  }
+
+  const player = await loadPlayer(userId);
+  if (player.enduranceCurrent < job.enduranceCost) {
+    throw new AppError(
+      400,
+      "Not enough endurance",
+      "INSUFFICIENT_ENDURANCE",
+    );
+  }
+
+  const now = new Date();
+  await db
+    .update(players)
+    .set({
+      enduranceCurrent: player.enduranceCurrent - job.enduranceCost,
+      coins: player.coins + job.coinReward,
+      enduranceResetAt: now,
+      updatedAt: now,
+    })
+    .where(eq(players.id, player.id));
+
+  await db.insert(auditLogs).values({
+    actorUserId: userId,
+    action: "economy.work",
+    entityType: "player",
+    entityId: player.id,
+    metadata: {
+      jobId: job.id,
+      enduranceCost: job.enduranceCost,
+      coinReward: job.coinReward,
+    },
+  });
+
+  const pub = await getPlayerByUserId(userId);
+  if (!pub) throw new AppError(404, "Player not found", "PLAYER_NOT_FOUND");
+  return pub;
+}
+
+export async function buyShopItem(
+  userId: string,
+  itemId: string,
+): Promise<PlayerPublic> {
+  const item = SHOP_ITEMS.find((i) => i.id === itemId);
+  if (!item) {
+    throw new AppError(404, "Item not found", "ITEM_NOT_FOUND");
+  }
+
+  const player = await loadPlayer(userId);
+  if (player.coins < item.coinCost || player.stars < item.starCost) {
+    throw new AppError(400, "Not enough currency", "INSUFFICIENT_FUNDS");
+  }
+
+  const now = new Date();
+  let coins = player.coins - item.coinCost;
+  let stars = player.stars - item.starCost;
+  const appearance = appearanceRecord(player);
+  let skillBump: { skill: SkillCode; gain: number } | null = null;
+
+  if (item.kind === "boost_coins") {
+    coins += 60;
+  } else if (item.kind === "boost_skill") {
+    const gain = item.skillGain ?? 2;
+    const skills = POSITION_SKILLS[player.position];
+    const skill = skills[Math.floor(Math.random() * skills.length)]!;
+    const row = await db.query.playerSkillValues.findFirst({
+      where: and(
+        eq(playerSkillValues.playerId, player.id),
+        eq(playerSkillValues.skillCode, skill),
+      ),
+    });
+    const nextVal = (row?.value ?? 10) + gain;
+    if (row) {
+      await db
+        .update(playerSkillValues)
+        .set({ value: nextVal, updatedAt: now })
+        .where(eq(playerSkillValues.id, row.id));
+    } else {
+      await db.insert(playerSkillValues).values({
+        playerId: player.id,
+        skillCode: skill,
+        value: nextVal,
+      });
+    }
+    skillBump = { skill, gain };
+    const all = await db.query.playerSkillValues.findMany({
+      where: eq(playerSkillValues.playerId, player.id),
+    });
+    const map = {} as Record<SkillCode, number>;
+    for (const r of all) map[r.skillCode] = r.value;
+    if (skillBump) map[skill] = nextVal;
+    const playingStrength = computePlayingStrength(player.position, map);
+    await db
+      .update(players)
+      .set({
+        coins,
+        stars,
+        playingStrength,
+        updatedAt: now,
+      })
+      .where(eq(players.id, player.id));
+  } else if (item.kind === "unlock_hair" && item.hairStyleId) {
+    const unlocked = new Set(unlockedHairIds(player));
+    if (unlocked.has(item.hairStyleId)) {
+      throw new AppError(400, "Already unlocked", "ALREADY_OWNED");
+    }
+    unlocked.add(item.hairStyleId);
+    appearance.unlockedHairIds = [...unlocked];
+    await db
+      .update(players)
+      .set({
+        coins,
+        stars,
+        appearance: appearance as Player["appearance"],
+        updatedAt: now,
+      })
+      .where(eq(players.id, player.id));
+  }
+
+  if (item.kind === "boost_coins") {
+    await db
+      .update(players)
+      .set({ coins, stars, updatedAt: now })
+      .where(eq(players.id, player.id));
+  }
+
+  await db.insert(auditLogs).values({
+    actorUserId: userId,
+    action: "economy.shop",
+    entityType: "player",
+    entityId: player.id,
+    metadata: { itemId: item.id, skillBump },
+  });
+
+  const pub = await getPlayerByUserId(userId);
+  if (!pub) throw new AppError(404, "Player not found", "PLAYER_NOT_FOUND");
+  return pub;
+}
+
+export async function buyFitnessItem(
+  userId: string,
+  itemId: string,
+): Promise<PlayerPublic> {
+  const item = FITNESS_ITEMS.find((i) => i.id === itemId);
+  if (!item) {
+    throw new AppError(404, "Item not found", "ITEM_NOT_FOUND");
+  }
+
+  const player = await loadPlayer(userId);
+  if (player.coins < item.coinCost || player.stars < item.starCost) {
+    throw new AppError(400, "Not enough currency", "INSUFFICIENT_FUNDS");
+  }
+  if (player.enduranceCurrent >= ENDURANCE_MAX) {
+    throw new AppError(400, "Endurance is already full", "ENDURANCE_FULL");
+  }
+
+  const now = new Date();
+  const enduranceCurrent = Math.min(
+    ENDURANCE_MAX,
+    player.enduranceCurrent + item.enduranceRestore,
+  );
+
+  await db
+    .update(players)
+    .set({
+      coins: player.coins - item.coinCost,
+      stars: player.stars - item.starCost,
+      enduranceCurrent,
+      enduranceResetAt: now,
+      updatedAt: now,
+    })
+    .where(eq(players.id, player.id));
+
+  await db.insert(auditLogs).values({
+    actorUserId: userId,
+    action: "economy.fitness",
+    entityType: "player",
+    entityId: player.id,
+    metadata: {
+      itemId: item.id,
+      restored: item.enduranceRestore,
+      enduranceCurrent,
+    },
+  });
+
+  const pub = await getPlayerByUserId(userId);
+  if (!pub) throw new AppError(404, "Player not found", "PLAYER_NOT_FOUND");
+  return pub;
+}
+
+export async function buyStarPack(
+  userId: string,
+  packId: string,
+): Promise<PlayerPublic> {
+  const pack = STAR_PACKS.find((p) => p.id === packId);
+  if (!pack) {
+    throw new AppError(404, "Pack not found", "PACK_NOT_FOUND");
+  }
+
+  const player = await loadPlayer(userId);
+  if (player.coins < pack.coinCost) {
+    throw new AppError(400, "Not enough coins", "INSUFFICIENT_FUNDS");
+  }
+
+  const now = new Date();
+  await db
+    .update(players)
+    .set({
+      coins: player.coins - pack.coinCost,
+      stars: player.stars + pack.starsGranted,
+      updatedAt: now,
+    })
+    .where(eq(players.id, player.id));
+
+  await db.insert(auditLogs).values({
+    actorUserId: userId,
+    action: "economy.stars",
+    entityType: "player",
+    entityId: player.id,
+    metadata: {
+      packId: pack.id,
+      coinCost: pack.coinCost,
+      starsGranted: pack.starsGranted,
+    },
+  });
+
+  const pub = await getPlayerByUserId(userId);
+  if (!pub) throw new AppError(404, "Player not found", "PLAYER_NOT_FOUND");
+  return pub;
+}

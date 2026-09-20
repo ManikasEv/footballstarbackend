@@ -34,6 +34,15 @@ const FREE_ACCESSORIES = [
   "white_sweatband",
 ] as const;
 
+const FREE_FACIAL_HAIR = [
+  "stubble",
+  "moustache",
+  "goatee",
+  "short_boxed",
+  "full_trimmed",
+  "rugged_medium",
+] as const;
+
 const MALE_SKINS = [
   "light_warm",
   "light_medium",
@@ -67,6 +76,8 @@ export const playerAppearanceSchema = z
     facialHairId: z.string().min(1).max(64).nullable().optional(),
     accessoryIds: z.array(z.string().min(1).max(64)).max(4).optional(),
     kitId: z.string().min(1).max(64).optional(),
+    unlockedHairIds: z.array(z.string().min(1).max(64)).max(16).optional(),
+    clubName: z.string().min(2).max(40).nullable().optional(),
     skinColour: z.string().min(1).max(32).optional(),
     hairColour: z.string().min(1).max(32).optional(),
     hairStyle: z.string().min(1).max(32).optional(),
@@ -76,6 +87,8 @@ export const playerAppearanceSchema = z
     const freeHair =
       gender === "female" ? FREE_FEMALE_HAIR : FREE_MALE_HAIR;
     const skins = gender === "female" ? FEMALE_SKINS : MALE_SKINS;
+    const unlockedHairIds = [...new Set(raw.unlockedHairIds ?? [])];
+    const allowedHair = new Set<string>([...freeHair, ...unlockedHairIds]);
 
     let skinToneId = raw.skinToneId ?? (gender === "female" ? "medium_golden" : "light_medium");
     if (!(skins as readonly string[]).includes(skinToneId)) {
@@ -85,8 +98,7 @@ export const playerAppearanceSchema = z
     let hairStyleId =
       raw.hairStyleId ??
       (gender === "female" ? "high_ponytail" : "textured_crop");
-    if (!(freeHair as readonly string[]).includes(hairStyleId)) {
-      // Locked / wrong-gender hair cannot be saved at create-time
+    if (!allowedHair.has(hairStyleId)) {
       hairStyleId = gender === "female" ? "high_ponytail" : "textured_crop";
     }
 
@@ -94,6 +106,15 @@ export const playerAppearanceSchema = z
     const accessoryIds = (raw.accessoryIds ?? []).filter((id) =>
       (FREE_ACCESSORIES as readonly string[]).includes(id),
     );
+
+    let facialHairId: string | null = null;
+    if (gender !== "female" && raw.facialHairId) {
+      facialHairId = (FREE_FACIAL_HAIR as readonly string[]).includes(
+        raw.facialHairId,
+      )
+        ? raw.facialHairId
+        : null;
+    }
 
     const skinColour =
       raw.skinColour ??
@@ -159,9 +180,11 @@ export const playerAppearanceSchema = z
       eyeColorId: raw.eyeColorId ?? "brown",
       noseStyleId: raw.noseStyleId ?? "nose_straight",
       mouthStyleId: raw.mouthStyleId ?? "mouth_smile",
-      facialHairId: gender === "female" ? null : (raw.facialHairId ?? null),
+      facialHairId,
       accessoryIds,
       kitId: raw.kitId ?? "home_blue",
+      unlockedHairIds,
+      clubName: raw.clubName ?? null,
       skinColour,
       hairColour,
       hairStyle,

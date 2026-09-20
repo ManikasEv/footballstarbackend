@@ -151,7 +151,54 @@ export function computePlayingStrength(
   );
 }
 
-/** Next UTC midnight for mature endurance reset (no passive regen). */
+/** Cap for player endurance. */
+export const ENDURANCE_MAX = 100;
+/** +1 endurance every minute while below cap. */
+export const ENDURANCE_REGEN_MS = 60_000;
+
+/**
+ * Passive regen: +1 per minute since last tick, capped at ENDURANCE_MAX.
+ * `enduranceResetAt` stores the last applied tick time (not midnight).
+ */
+export function applyEnduranceRegen(
+  current: number,
+  lastTickAt: Date,
+  now = new Date(),
+): { enduranceCurrent: number; lastTickAt: Date; changed: boolean } {
+  // Legacy midnight-reset timestamps were in the future — clamp to now.
+  const tick =
+    lastTickAt.getTime() > now.getTime() ? now : lastTickAt;
+  const migrated = tick.getTime() !== lastTickAt.getTime();
+
+  if (current >= ENDURANCE_MAX) {
+    return {
+      enduranceCurrent: ENDURANCE_MAX,
+      lastTickAt: tick,
+      changed: migrated,
+    };
+  }
+
+  const elapsed = Math.max(0, now.getTime() - tick.getTime());
+  const gained = Math.min(
+    ENDURANCE_MAX - current,
+    Math.floor(elapsed / ENDURANCE_REGEN_MS),
+  );
+  if (gained <= 0) {
+    return {
+      enduranceCurrent: current,
+      lastTickAt: tick,
+      changed: migrated,
+    };
+  }
+
+  return {
+    enduranceCurrent: current + gained,
+    lastTickAt: new Date(tick.getTime() + gained * ENDURANCE_REGEN_MS),
+    changed: true,
+  };
+}
+
+/** @deprecated Midnight reset removed — endurance now regens +1/min. */
 export function nextUtcMidnight(from = new Date()): Date {
   const next = new Date(from);
   next.setUTCHours(24, 0, 0, 0);
