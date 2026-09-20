@@ -1,8 +1,19 @@
-import express from "express";
+import express, { type RequestHandler } from "express";
 import cors from "cors";
-import helmet from "helmet";
+import helmetImport from "helmet";
 import { v1Router } from "./routes/v1/index.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
+
+/**
+ * Helmet 8 ships dual CJS/ESM; under NodeNext on Vercel the default import
+ * is sometimes typed as a module namespace (not callable). Normalize it.
+ */
+const helmet = (
+  typeof helmetImport === "function"
+    ? helmetImport
+    : (helmetImport as unknown as { default: (...args: never[]) => RequestHandler })
+        .default
+) as (...args: never[]) => RequestHandler;
 
 export function createApp() {
   const app = express();
