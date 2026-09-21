@@ -184,6 +184,8 @@ export type PlayerAppearance = {
   skinColour: string;
   hairColour: string;
   hairStyle: string;
+  clubName?: string | null;
+  clubRole?: "owner" | "member" | null;
 };
 
 export const players = pgTable(
@@ -207,6 +209,14 @@ export const players = pgTable(
     enduranceCurrent: integer("endurance_current").notNull().default(100),
     /** Last endurance regen tick (+1 per minute while below 100). */
     enduranceResetAt: timestamp("endurance_reset_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /**
+     * Match/training fatigue. 0 = fresh, 100 = exhausted.
+     * Recovers −1 every 2 minutes; spa programs cut it faster.
+     */
+    tirednessCurrent: integer("tiredness_current").notNull().default(0),
+    tirednessResetAt: timestamp("tiredness_reset_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
     appearance: jsonb("appearance").$type<PlayerAppearance>().notNull(),
@@ -347,11 +357,106 @@ export const playerTrainingChain = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Clubs / leagues / bots
+// ---------------------------------------------------------------------------
+
+export const leagueTierEnum = pgEnum("league_tier", [
+  "bronze",
+  "silver",
+  "gold",
+  "platinum",
+  "diamond",
+  "champion",
+]);
+
+export const clubMemberRoleEnum = pgEnum("club_member_role", [
+  "owner",
+  "member",
+]);
+
+/** Pitch slots for a 4-4-2 squad. */
+export const squadSlotEnum = pgEnum("squad_slot", [
+  "gk",
+  "lb",
+  "cb",
+  "rb",
+  "lm",
+  "cm",
+  "rm",
+  "st",
+]);
+
+export const clubs = pgTable(
+  "clubs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    worldId: uuid("world_id")
+      .notNull()
+      .references(() => worlds.id),
+    name: text("name").notNull(),
+    tier: leagueTierEnum("tier").notNull().default("bronze"),
+    /** Seeded NPC clubs — real players cannot join these. */
+    isSystem: integer("is_system").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("clubs_world_id_idx").on(table.worldId),
+    index("clubs_tier_idx").on(table.tier),
+    uniqueIndex("clubs_world_name_uidx").on(table.worldId, table.name),
+  ],
+);
+
+export const clubMemberships = pgTable(
+  "club_memberships",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    clubId: uuid("club_id")
+      .notNull()
+      .references(() => clubs.id, { onDelete: "cascade" }),
+    playerId: uuid("player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    role: clubMemberRoleEnum("role").notNull().default("member"),
+    joinedAt: timestamp("joined_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("club_memberships_player_id_uidx").on(table.playerId),
+    index("club_memberships_club_id_idx").on(table.clubId),
+  ],
+);
+
+/** NPC squad members (15 per club for 4-4-2 + bench). */
+export const botPlayers = pgTable(
+  "bot_players",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    clubId: uuid("club_id")
+      .notNull()
+      .references(() => clubs.id, { onDelete: "cascade" }),
+    displayName: text("display_name").notNull(),
+    position: playerPositionEnum("position").notNull(),
+    slot: squadSlotEnum("slot").notNull(),
+    isStarter: integer("is_starter").notNull().default(1),
+    playingStrength: integer("playing_strength").notNull().default(100),
+    tirednessCurrent: integer("tiredness_current").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [index("bot_players_club_id_idx").on(table.clubId)],
+);
+
+// ---------------------------------------------------------------------------
 // Relations
 // ---------------------------------------------------------------------------
 
 export const worldsRelations = relations(worlds, ({ many }) => ({
   players: many(players),
+  clubs: many(clubs),
 }));
 
 export const usersRelations = relations(users, ({ one, many }) => ({
@@ -385,6 +490,40 @@ export const playersRelations = relations(players, ({ one, many }) => ({
   trainingChain: one(playerTrainingChain, {
     fields: [players.id],
     references: [playerTrainingChain.playerId],
+  }),
+  clubMembership: one(clubMemberships, {
+    fields: [players.id],
+    references: [clubMemberships.playerId],
+  }),
+}));
+
+export const clubsRelations = relations(clubs, ({ one, many }) => ({
+  world: one(worlds, {
+    fields: [clubs.worldId],
+    references: [worlds.id],
+  }),
+  memberships: many(clubMemberships),
+  bots: many(botPlayers),
+}));
+
+export const clubMembershipsRelations = relations(
+  clubMemberships,
+  ({ one }) => ({
+    club: one(clubs, {
+      fields: [clubMemberships.clubId],
+      references: [clubs.id],
+    }),
+    player: one(players, {
+      fields: [clubMemberships.playerId],
+      references: [players.id],
+    }),
+  }),
+);
+
+export const botPlayersRelations = relations(botPlayers, ({ one }) => ({
+  club: one(clubs, {
+    fields: [botPlayers.clubId],
+    references: [clubs.id],
   }),
 }));
 
@@ -449,8 +588,13 @@ export type World = typeof worlds.$inferSelect;
 export type TrainingOffer = typeof trainingOffers.$inferSelect;
 export type TrainingSession = typeof trainingSessions.$inferSelect;
 export type PlayerTrainingChain = typeof playerTrainingChain.$inferSelect;
+export type Club = typeof clubs.$inferSelect;
+export type ClubMembership = typeof clubMemberships.$inferSelect;
+export type BotPlayer = typeof botPlayers.$inferSelect;
 export type PlayerPosition = (typeof playerPositionEnum.enumValues)[number];
 export type SkillCode = (typeof skillCodeEnum.enumValues)[number];
+export type LeagueTier = (typeof leagueTierEnum.enumValues)[number];
+export type SquadSlot = (typeof squadSlotEnum.enumValues)[number];
 export type TrainingChainColor =
   (typeof trainingChainColorEnum.enumValues)[number];
 export type TrainingOfferKind =

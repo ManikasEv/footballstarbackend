@@ -4,6 +4,7 @@ import type { AuthenticatedRequest } from "../../middleware/auth.js";
 import {
   buyFitnessItem,
   buyShopItem,
+  buySpaItem,
   buyStarPack,
   completeWorkJob,
   getEconomyCatalog,
@@ -44,6 +45,17 @@ economyRouter.post("/fitness", async (req, res, next) => {
     const { user } = (req as AuthenticatedRequest).auth;
     const { id } = idBody.parse(req.body);
     const player = await buyFitnessItem(user.id, id);
+    res.json({ data: { player } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+economyRouter.post("/spa", async (req, res, next) => {
+  try {
+    const { user } = (req as AuthenticatedRequest).auth;
+    const { id } = idBody.parse(req.body);
+    const player = await buySpaItem(user.id, id);
     res.json({ data: { player } });
   } catch (err) {
     next(err);

@@ -11,11 +11,13 @@ import {
   ENDURANCE_MAX,
   POSITION_SKILLS,
   applyEnduranceRegen,
+  applyTirednessRegen,
   computePlayingStrength,
 } from "../game/constants.js";
 import {
   FITNESS_ITEMS,
   SHOP_ITEMS,
+  SPA_ITEMS,
   STAR_PACKS,
   WORK_JOBS,
 } from "../game/economyCatalog.js";
@@ -30,17 +32,24 @@ async function loadPlayer(userId: string): Promise<Player> {
     throw new AppError(404, "Player not found", "PLAYER_NOT_FOUND");
   }
   const now = new Date();
-  const regen = applyEnduranceRegen(
+  const endurance = applyEnduranceRegen(
     row.enduranceCurrent,
     row.enduranceResetAt,
     now,
   );
-  if (!regen.changed) return row;
+  const tiredness = applyTirednessRegen(
+    row.tirednessCurrent ?? 0,
+    row.tirednessResetAt ?? now,
+    now,
+  );
+  if (!endurance.changed && !tiredness.changed) return row;
   const [updated] = await db
     .update(players)
     .set({
-      enduranceCurrent: regen.enduranceCurrent,
-      enduranceResetAt: regen.lastTickAt,
+      enduranceCurrent: endurance.enduranceCurrent,
+      enduranceResetAt: endurance.lastTickAt,
+      tirednessCurrent: tiredness.tirednessCurrent,
+      tirednessResetAt: tiredness.lastTickAt,
       updatedAt: now,
     })
     .where(eq(players.id, row.id))
@@ -63,6 +72,7 @@ export function getEconomyCatalog() {
     work: WORK_JOBS,
     shop: SHOP_ITEMS,
     fitness: FITNESS_ITEMS,
+    spa: SPA_ITEMS,
     stars: STAR_PACKS,
   };
 }
@@ -256,6 +266,57 @@ export async function buyFitnessItem(
       itemId: item.id,
       restored: item.enduranceRestore,
       enduranceCurrent,
+    },
+  });
+
+  const pub = await getPlayerByUserId(userId);
+  if (!pub) throw new AppError(404, "Player not found", "PLAYER_NOT_FOUND");
+  return pub;
+}
+
+export async function buySpaItem(
+  userId: string,
+  itemId: string,
+): Promise<PlayerPublic> {
+  const item = SPA_ITEMS.find((i) => i.id === itemId);
+  if (!item) {
+    throw new AppError(404, "Program not found", "ITEM_NOT_FOUND");
+  }
+
+  const player = await loadPlayer(userId);
+  if (player.coins < item.coinCost || player.stars < item.starCost) {
+    throw new AppError(400, "Not enough currency", "INSUFFICIENT_FUNDS");
+  }
+  if ((player.tirednessCurrent ?? 0) <= 0) {
+    throw new AppError(400, "Already fully recovered", "TIREDNESS_EMPTY");
+  }
+
+  const now = new Date();
+  const tirednessCurrent = Math.max(
+    0,
+    (player.tirednessCurrent ?? 0) - item.tirednessRestore,
+  );
+
+  await db
+    .update(players)
+    .set({
+      coins: player.coins - item.coinCost,
+      stars: player.stars - item.starCost,
+      tirednessCurrent,
+      tirednessResetAt: now,
+      updatedAt: now,
+    })
+    .where(eq(players.id, player.id));
+
+  await db.insert(auditLogs).values({
+    actorUserId: userId,
+    action: "economy.spa",
+    entityType: "player",
+    entityId: player.id,
+    metadata: {
+      itemId: item.id,
+      restored: item.tirednessRestore,
+      tirednessCurrent,
     },
   });
 

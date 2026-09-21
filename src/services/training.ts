@@ -16,8 +16,11 @@ import {
 import {
   ALL_SKILL_CODES,
   POSITION_SKILLS,
+  TIREDNESS_MAX,
   applyEnduranceRegen,
+  applyTirednessRegen,
   computePlayingStrength,
+  tirednessFromTraining,
 } from "../game/constants.js";
 import {
   advanceTrainingChain,
@@ -28,21 +31,28 @@ import { generateTrainingOffers } from "../game/trainingOffers.js";
 import { AppError } from "../middleware/error.js";
 import { getPlayerByUserId } from "./players.js";
 
-async function applyEnduranceReset(player: Player): Promise<Player> {
+async function applyVitalsReset(player: Player): Promise<Player> {
   const now = new Date();
-  const next = applyEnduranceRegen(
+  const endurance = applyEnduranceRegen(
     player.enduranceCurrent,
     player.enduranceResetAt,
     now,
   );
-  if (!next.changed) {
+  const tiredness = applyTirednessRegen(
+    player.tirednessCurrent ?? 0,
+    player.tirednessResetAt ?? now,
+    now,
+  );
+  if (!endurance.changed && !tiredness.changed) {
     return player;
   }
   const [updated] = await db
     .update(players)
     .set({
-      enduranceCurrent: next.enduranceCurrent,
-      enduranceResetAt: next.lastTickAt,
+      enduranceCurrent: endurance.enduranceCurrent,
+      enduranceResetAt: endurance.lastTickAt,
+      tirednessCurrent: tiredness.tirednessCurrent,
+      tirednessResetAt: tiredness.lastTickAt,
       updatedAt: now,
     })
     .where(eq(players.id, player.id))
@@ -57,7 +67,7 @@ async function getPlayerRow(userId: string): Promise<Player> {
   if (!row) {
     throw new AppError(404, "No player found for this account", "NO_PLAYER");
   }
-  return applyEnduranceReset(row);
+  return applyVitalsReset(row);
 }
 
 async function ensureChainRow(playerId: string) {
@@ -427,6 +437,14 @@ export async function startTraining(userId: string, offerId: string) {
     );
   }
 
+  if ((player.tirednessCurrent ?? 0) >= TIREDNESS_MAX) {
+    throw new AppError(
+      400,
+      "Too tired to train — visit the Spa",
+      "TOO_TIRED",
+    );
+  }
+
   const kind = (offer.kind ?? "session") as TrainingOfferKind;
   const chain = await ensureChainRow(player.id);
 
@@ -452,13 +470,19 @@ export async function startTraining(userId: string, offerId: string) {
 
   const now = new Date();
   const endsAt = new Date(now.getTime() + offer.durationSeconds * 1000);
+  const tirednessGain = tirednessFromTraining(offer.enduranceCost);
+  const tirednessCurrent = Math.min(
+    TIREDNESS_MAX,
+    (player.tirednessCurrent ?? 0) + tirednessGain,
+  );
 
   const [updatedPlayer] = await db
     .update(players)
     .set({
       enduranceCurrent: player.enduranceCurrent - offer.enduranceCost,
-      // Regen clock starts from spend so +1/min resumes from here
       enduranceResetAt: now,
+      tirednessCurrent,
+      tirednessResetAt: now,
       updatedAt: now,
     })
     .where(eq(players.id, player.id))

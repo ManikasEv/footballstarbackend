@@ -135,6 +135,16 @@ export const SHOP_ITEMS: ShopItem[] = [
   },
 ];
 
+export type SpaItem = {
+  id: string;
+  label: string;
+  blurb: string;
+  coinCost: number;
+  starCost: number;
+  tirednessRestore: number;
+  accent: "green" | "blue" | "orange" | "purple";
+};
+
 export const FITNESS_ITEMS: FitnessItem[] = [
   {
     id: "water",
@@ -198,5 +208,44 @@ export const STAR_PACKS: StarPack[] = [
     coinCost: 500,
     starsGranted: 40,
     accent: "orange",
+  },
+];
+
+export const SPA_ITEMS: SpaItem[] = [
+  {
+    id: "quick_rinse",
+    label: "Quick rinse",
+    blurb: "Cold water splash — take the edge off.",
+    coinCost: 25,
+    starCost: 0,
+    tirednessRestore: 12,
+    accent: "blue",
+  },
+  {
+    id: "steam_room",
+    label: "Steam room",
+    blurb: "Twenty minutes of heat and quiet.",
+    coinCost: 55,
+    starCost: 0,
+    tirednessRestore: 28,
+    accent: "green",
+  },
+  {
+    id: "deep_tissue",
+    label: "Deep tissue",
+    blurb: "Physio table — serious recovery.",
+    coinCost: 0,
+    starCost: 2,
+    tirednessRestore: 50,
+    accent: "orange",
+  },
+  {
+    id: "full_spa_day",
+    label: "Full spa day",
+    blurb: "Wipe tiredness completely.",
+    coinCost: 0,
+    starCost: 5,
+    tirednessRestore: 100,
+    accent: "purple",
   },
 ];

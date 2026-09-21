@@ -156,6 +156,11 @@ export const ENDURANCE_MAX = 100;
 /** +1 endurance every minute while below cap. */
 export const ENDURANCE_REGEN_MS = 60_000;
 
+/** Cap for tiredness (100 = exhausted). */
+export const TIREDNESS_MAX = 100;
+/** Recover −1 tiredness every 2 minutes while above 0. */
+export const TIREDNESS_REGEN_MS = 120_000;
+
 /**
  * Passive regen: +1 per minute since last tick, capped at ENDURANCE_MAX.
  * `enduranceResetAt` stores the last applied tick time (not midnight).
@@ -196,6 +201,53 @@ export function applyEnduranceRegen(
     lastTickAt: new Date(tick.getTime() + gained * ENDURANCE_REGEN_MS),
     changed: true,
   };
+}
+
+/**
+ * Passive recovery: −1 tiredness every 2 minutes toward 0.
+ * `tirednessResetAt` stores the last applied recovery tick.
+ */
+export function applyTirednessRegen(
+  current: number,
+  lastTickAt: Date,
+  now = new Date(),
+): { tirednessCurrent: number; lastTickAt: Date; changed: boolean } {
+  const tick =
+    lastTickAt.getTime() > now.getTime() ? now : lastTickAt;
+  const migrated = tick.getTime() !== lastTickAt.getTime();
+  const clamped = Math.max(0, Math.min(TIREDNESS_MAX, current));
+
+  if (clamped <= 0) {
+    return {
+      tirednessCurrent: 0,
+      lastTickAt: tick,
+      changed: migrated || clamped !== current,
+    };
+  }
+
+  const elapsed = Math.max(0, now.getTime() - tick.getTime());
+  const recovered = Math.min(
+    clamped,
+    Math.floor(elapsed / TIREDNESS_REGEN_MS),
+  );
+  if (recovered <= 0) {
+    return {
+      tirednessCurrent: clamped,
+      lastTickAt: tick,
+      changed: migrated || clamped !== current,
+    };
+  }
+
+  return {
+    tirednessCurrent: clamped - recovered,
+    lastTickAt: new Date(tick.getTime() + recovered * TIREDNESS_REGEN_MS),
+    changed: true,
+  };
+}
+
+/** Tiredness gained from a training session (scales with endurance cost). */
+export function tirednessFromTraining(enduranceCost: number): number {
+  return Math.max(2, Math.min(25, Math.round(enduranceCost * 0.45)));
 }
 
 /** @deprecated Midnight reset removed — endurance now regens +1/min. */

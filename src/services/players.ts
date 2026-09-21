@@ -21,6 +21,7 @@ import {
   POSITION_SKILLS,
   STARTING_POSITION_SKILL_BONUS,
   applyEnduranceRegen,
+  applyTirednessRegen,
   computePlayingStrength,
   skillsAfterPositionChange,
 } from "../game/constants.js";
@@ -64,23 +65,30 @@ function toPublic(
   };
 }
 
-/** Apply accrued +1/min endurance regen and persist when gained. */
-async function applyEnduranceResetIfDue(player: Player): Promise<Player> {
+/** Apply accrued endurance + tiredness regen and persist when changed. */
+async function applyVitalsResetIfDue(player: Player): Promise<Player> {
   const now = new Date();
-  const next = applyEnduranceRegen(
+  const endurance = applyEnduranceRegen(
     player.enduranceCurrent,
     player.enduranceResetAt,
     now,
   );
-  if (!next.changed) {
+  const tiredness = applyTirednessRegen(
+    player.tirednessCurrent ?? 0,
+    player.tirednessResetAt ?? now,
+    now,
+  );
+  if (!endurance.changed && !tiredness.changed) {
     return player;
   }
 
   const [updated] = await db
     .update(players)
     .set({
-      enduranceCurrent: next.enduranceCurrent,
-      enduranceResetAt: next.lastTickAt,
+      enduranceCurrent: endurance.enduranceCurrent,
+      enduranceResetAt: endurance.lastTickAt,
+      tirednessCurrent: tiredness.tirednessCurrent,
+      tirednessResetAt: tiredness.lastTickAt,
       updatedAt: now,
     })
     .where(eq(players.id, player.id))
@@ -104,7 +112,7 @@ export async function getPlayerByUserId(
     return null;
   }
 
-  const refreshed = await applyEnduranceResetIfDue(player);
+  const refreshed = await applyVitalsResetIfDue(player);
   const skillRows = await ensureSkillRows(
     player.id,
     player.position,
@@ -226,6 +234,8 @@ export async function createPlayerForUser(
         stars: 10,
         enduranceCurrent: 100,
         enduranceResetAt: new Date(),
+        tirednessCurrent: 0,
+        tirednessResetAt: new Date(),
         appearance: input.appearance,
       })
       .returning();
@@ -299,7 +309,7 @@ export async function changePlayerPosition(
   }
 
   if (player.position === position) {
-    const refreshed = await applyEnduranceResetIfDue(player);
+    const refreshed = await applyVitalsResetIfDue(player);
     return toPublic(refreshed, player.skills, player.tactics);
   }
 
