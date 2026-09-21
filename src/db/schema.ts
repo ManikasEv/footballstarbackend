@@ -163,17 +163,22 @@ export const auditLogs = pgTable("audit_logs", {
 
 export type PlayerAppearance = {
   gender: "male" | "female";
-  /** Illustrated Create Player — 3 = male/female catalog */
-  schemaVersion?: 2 | 3;
+  /** Clean player kit — 4 = blank-face + layered kit */
+  schemaVersion?: 2 | 3 | 4;
   skinToneId?: string;
   hairStyleId?: string;
   hairColorId?: string;
+  browStyleId?: string;
   eyeStyleId?: string;
   eyeColorId?: string;
   noseStyleId?: string;
   mouthStyleId?: string;
   facialHairId?: string | null;
   accessoryIds?: string[];
+  shirtPatternId?: string;
+  shortsColourId?: string;
+  socksColourId?: string;
+  bootsColourId?: string;
   kitId?: string;
   /** Legacy mirrors */
   skinColour: string;
