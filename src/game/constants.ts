@@ -250,6 +250,14 @@ export function tirednessFromTraining(enduranceCost: number): number {
   return Math.max(2, Math.min(25, Math.round(enduranceCost * 0.45)));
 }
 
+/** Tiredness from playing a competitive match (starter vs sub). */
+export function tirednessFromMatch(minutes: number, wasStarter: boolean): number {
+  if (minutes <= 0) return 0;
+  const base = wasStarter ? 18 : 8;
+  const scaled = Math.round(base * (Math.min(90, minutes) / 90));
+  return Math.max(4, Math.min(28, scaled));
+}
+
 /** @deprecated Midnight reset removed — endurance now regens +1/min. */
 export function nextUtcMidnight(from = new Date()): Date {
   const next = new Date(from);

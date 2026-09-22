@@ -4,6 +4,7 @@ import type { AuthenticatedRequest } from "../../middleware/auth.js";
 import {
   createPlayerClub,
   getMyClub,
+  getMySquad,
   joinPlayerClub,
   leavePlayerClub,
   listLeagueClubs,
@@ -26,6 +27,16 @@ clubsRouter.get("/me", async (req, res, next) => {
     const { user } = (req as AuthenticatedRequest).auth;
     const club = await getMyClub(user.id);
     res.json({ data: { club } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+clubsRouter.get("/me/squad", async (req, res, next) => {
+  try {
+    const { user } = (req as AuthenticatedRequest).auth;
+    const data = await getMySquad(user.id);
+    res.json({ data });
   } catch (err) {
     next(err);
   }

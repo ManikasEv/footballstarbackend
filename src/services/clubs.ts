@@ -87,6 +87,105 @@ export async function getMyClub(userId: string): Promise<ClubPublic | null> {
   return clubPublicFrom(membership.club, membership.role);
 }
 
+export type SquadMemberPublic = {
+  id: string;
+  name: string;
+  kind: "bot" | "human";
+  position: string;
+  slot: string;
+  number: number;
+  isStarter: boolean;
+  playingStrength: number;
+  appearance: Record<string, unknown>;
+};
+
+/** Full club roster for OG-style club preview sidebar. */
+export async function getMySquad(userId: string): Promise<{
+  club: ClubPublic;
+  squad: SquadMemberPublic[];
+}> {
+  const player = await db.query.players.findFirst({
+    where: eq(players.userId, userId),
+  });
+  if (!player) {
+    throw new AppError(404, "Player not found", "PLAYER_NOT_FOUND");
+  }
+  const membership = await db.query.clubMemberships.findFirst({
+    where: eq(clubMemberships.playerId, player.id),
+    with: { club: true },
+  });
+  if (!membership?.club) {
+    throw new AppError(400, "Not in a club", "NOT_IN_CLUB");
+  }
+  const club = membership.club;
+  await ensureClubBots(club.id, club.name, club.tier);
+
+  const bots = await db.query.botPlayers.findMany({
+    where: eq(botPlayers.clubId, club.id),
+  });
+  const humans = await db.query.clubMemberships.findMany({
+    where: eq(clubMemberships.clubId, club.id),
+  });
+
+  const squad: SquadMemberPublic[] = [];
+  let num = 1;
+
+  for (const m of humans) {
+    const p = await db.query.players.findFirst({
+      where: eq(players.id, m.playerId),
+    });
+    if (!p) continue;
+    const slotPrefer =
+      p.position === "goalkeeper"
+        ? "gk"
+        : p.position === "defender"
+          ? "cb"
+          : p.position === "midfielder"
+            ? "cm"
+            : "st";
+    squad.push({
+      id: p.id,
+      name: p.displayName,
+      kind: "human",
+      position: p.position,
+      slot: slotPrefer,
+      number: num++,
+      isStarter: true,
+      playingStrength: p.playingStrength,
+      appearance: p.appearance as unknown as Record<string, unknown>,
+    });
+  }
+
+  for (const b of bots) {
+    squad.push({
+      id: b.id,
+      name: b.displayName,
+      kind: "bot",
+      position: b.position,
+      slot: b.slot,
+      number: num++,
+      isStarter: b.isStarter === 1,
+      playingStrength: b.playingStrength,
+      appearance: b.appearance as unknown as Record<string, unknown>,
+    });
+  }
+
+  squad.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === "human" ? -1 : 1;
+    if (a.isStarter !== b.isStarter) return a.isStarter ? -1 : 1;
+    return a.number - b.number;
+  });
+  // Re-number after sort for display
+  squad.forEach((s, i) => {
+    s.number = i + 1;
+  });
+
+  return {
+    club: await clubPublicFrom(club, membership.role),
+    squad,
+  };
+}
+
 export async function listLeagueClubs(tier: LeagueTier) {
   const world = await getOpenWorldOrThrow();
   await ensureActiveSeason(world.id);

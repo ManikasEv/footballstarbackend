@@ -14,6 +14,7 @@ import {
 import { getOpenWorldOrThrow } from "../game/bootstrap.js";
 import { botAppearanceFor } from "../game/clubCatalog.js";
 import { matchFameFromStats } from "../game/fameCatalog.js";
+import { TIREDNESS_MAX, tirednessFromMatch } from "../game/constants.js";
 import {
   placeSquad,
   simulateMatch,
@@ -475,6 +476,28 @@ export async function playFixture(userId: string, fixtureId: string) {
     actorStats: sim.actorStats,
     kindById,
   });
+
+  // Humans who played pick up tiredness (test matches skip this path)
+  const now = new Date();
+  for (const stat of sim.actorStats) {
+    if (kindById.get(stat.id) !== "human" || stat.minutes <= 0) continue;
+    const gain = tirednessFromMatch(stat.minutes, stat.wasStarter);
+    const human = await db.query.players.findFirst({
+      where: eq(players.id, stat.id),
+    });
+    if (!human) continue;
+    await db
+      .update(players)
+      .set({
+        tirednessCurrent: Math.min(
+          TIREDNESS_MAX,
+          (human.tirednessCurrent ?? 0) + gain,
+        ),
+        tirednessResetAt: now,
+        updatedAt: now,
+      })
+      .where(eq(players.id, human.id));
+  }
 
   if (fixture.competition === "cup" && fixture.cupId) {
     await maybeAdvanceCup(fixture.cupId);

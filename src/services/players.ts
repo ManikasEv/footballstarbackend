@@ -56,6 +56,7 @@ function toPublic(
 ): PlayerPublic {
   return {
     ...player,
+    tirednessCurrent: player.tirednessCurrent ?? 0,
     skills: skillsToMap(skillRows),
     relevantSkills: POSITION_SKILLS[player.position],
     tactics: {
