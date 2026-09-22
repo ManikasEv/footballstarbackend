@@ -188,6 +188,27 @@ export type PlayerAppearance = {
   clubRole?: "owner" | "member" | null;
 };
 
+/** Shared club strip + crest — applied to every squad member. */
+export type ClubKit = {
+  shirtPatternId: string;
+  shortsColourId: string;
+  socksColourId: string;
+  badgeStyle: "shield" | "circle" | "diamond";
+  badgePrimary: string;
+  badgeSecondary: string;
+  badgeInitials: string;
+};
+
+export const DEFAULT_CLUB_KIT: ClubKit = {
+  shirtPatternId: "vertical",
+  shortsColourId: "colour-1",
+  socksColourId: "colour-1",
+  badgeStyle: "shield",
+  badgePrimary: "#1e4a8c",
+  badgeSecondary: "#f0b429",
+  badgeInitials: "FC",
+};
+
 export const players = pgTable(
   "players",
   {
@@ -397,6 +418,8 @@ export const clubs = pgTable(
     tier: leagueTierEnum("tier").notNull().default("bronze"),
     /** Seeded NPC clubs — real players cannot join these. */
     isSystem: integer("is_system").notNull().default(0),
+    /** Shared jersey + badge for the whole squad. */
+    kit: jsonb("kit").$type<ClubKit>().notNull().default(DEFAULT_CLUB_KIT),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

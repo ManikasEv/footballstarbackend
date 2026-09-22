@@ -7,11 +7,17 @@ import {
   clubs,
   players,
   type Club,
+  type ClubKit,
   type LeagueTier,
   type PlayerAppearance,
+  DEFAULT_CLUB_KIT,
 } from "../db/schema.js";
 import { getOpenWorldOrThrow } from "../game/bootstrap.js";
-import { LEAGUE_TIERS, MAX_SQUAD_SIZE } from "../game/clubCatalog.js";
+import {
+  LEAGUE_TIERS,
+  MAX_SQUAD_SIZE,
+  applyKitToAppearance,
+} from "../game/clubCatalog.js";
 import { AppError } from "../middleware/error.js";
 import { getPlayerByUserId, type PlayerPublic } from "./players.js";
 import {
@@ -24,12 +30,15 @@ function appearanceWithClub(
   appearance: PlayerAppearance,
   clubName: string | null,
   clubRole: "owner" | "member" | null,
+  kit?: ClubKit | null,
 ): PlayerAppearance {
-  return {
+  const withClub = {
     ...appearance,
     clubName,
     clubRole,
   };
+  if (!kit) return withClub;
+  return applyKitToAppearance(withClub, kit, clubName ?? undefined);
 }
 
 export async function ensureSystemLeagues(worldId: string) {
@@ -47,6 +56,7 @@ export type ClubPublic = {
   botCount: number;
   humanCount: number;
   squadCap: number;
+  kit: ClubKit;
 };
 
 async function clubPublicFrom(
@@ -70,6 +80,7 @@ async function clubPublicFrom(
     botCount: botCount[0]?.n ?? 0,
     humanCount: humanCount[0]?.n ?? 0,
     squadCap: MAX_SQUAD_SIZE,
+    kit: club.kit ?? DEFAULT_CLUB_KIT,
   };
 }
 
@@ -118,7 +129,8 @@ export async function getMySquad(userId: string): Promise<{
     throw new AppError(400, "Not in a club", "NOT_IN_CLUB");
   }
   const club = membership.club;
-  await ensureClubBots(club.id, club.name, club.tier);
+  const kit = club.kit ?? DEFAULT_CLUB_KIT;
+  await ensureClubBots(club.id, club.name, club.tier, kit);
 
   const bots = await db.query.botPlayers.findMany({
     where: eq(botPlayers.clubId, club.id),
@@ -152,7 +164,11 @@ export async function getMySquad(userId: string): Promise<{
       number: num++,
       isStarter: true,
       playingStrength: p.playingStrength,
-      appearance: p.appearance as unknown as Record<string, unknown>,
+      appearance: applyKitToAppearance(
+        p.appearance,
+        kit,
+        club.name,
+      ) as unknown as Record<string, unknown>,
     });
   }
 
@@ -166,7 +182,11 @@ export async function getMySquad(userId: string): Promise<{
       number: num++,
       isStarter: b.isStarter === 1,
       playingStrength: b.playingStrength,
-      appearance: b.appearance as unknown as Record<string, unknown>,
+      appearance: applyKitToAppearance(
+        b.appearance as PlayerAppearance,
+        kit,
+        club.name,
+      ) as unknown as Record<string, unknown>,
     });
   }
 
@@ -206,6 +226,7 @@ export async function listLeagueClubs(tier: LeagueTier) {
 export async function createPlayerClub(
   userId: string,
   name: string,
+  kitInput?: Partial<ClubKit>,
 ): Promise<{ player: PlayerPublic; club: ClubPublic }> {
   const trimmed = name.trim();
   if (trimmed.length < 3 || trimmed.length > 40) {
@@ -229,7 +250,7 @@ export async function createPlayerClub(
     throw new AppError(409, "Already in a club", "ALREADY_IN_CLUB");
   }
 
-  const { club } = await claimBronzeClubSlot(world.id, trimmed);
+  const { club } = await claimBronzeClubSlot(world.id, trimmed, kitInput);
 
   await db.insert(clubMemberships).values({
     clubId: club.id,
@@ -241,7 +262,12 @@ export async function createPlayerClub(
   await db
     .update(players)
     .set({
-      appearance: appearanceWithClub(player.appearance, trimmed, "owner"),
+      appearance: appearanceWithClub(
+        player.appearance,
+        trimmed,
+        "owner",
+        club.kit,
+      ),
       updatedAt: now,
     })
     .where(eq(players.id, player.id));
@@ -251,7 +277,7 @@ export async function createPlayerClub(
     action: "club.create",
     entityType: "club",
     entityId: club.id,
-    metadata: { name: trimmed, tier: "bronze", claimedNpc: true },
+    metadata: { name: trimmed, tier: "bronze", claimedNpc: true, kit: club.kit },
   });
 
   const pub = await getPlayerByUserId(userId);
@@ -318,7 +344,12 @@ export async function joinPlayerClub(
   await db
     .update(players)
     .set({
-      appearance: appearanceWithClub(player.appearance, club.name, "member"),
+      appearance: appearanceWithClub(
+        player.appearance,
+        club.name,
+        "member",
+        club.kit,
+      ),
       updatedAt: new Date(),
     })
     .where(eq(players.id, player.id));

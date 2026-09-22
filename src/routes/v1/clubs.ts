@@ -118,13 +118,31 @@ clubsRouter.get("/leagues/:tier", async (req, res, next) => {
 
 const createBody = z.object({
   name: z.string().trim().min(3).max(40),
+  kit: z
+    .object({
+      shirtPatternId: z.enum([
+        "home",
+        "solid",
+        "vertical",
+        "hoops",
+        "diagonal",
+        "halves",
+      ]),
+      shortsColourId: z.string().regex(/^colour-[1-5]$/),
+      socksColourId: z.string().regex(/^colour-[1-5]$/),
+      badgeStyle: z.enum(["shield", "circle", "diamond"]),
+      badgePrimary: z.string().min(4).max(20),
+      badgeSecondary: z.string().min(4).max(20),
+      badgeInitials: z.string().trim().min(1).max(3),
+    })
+    .optional(),
 });
 
 clubsRouter.post("/", async (req, res, next) => {
   try {
     const { user } = (req as AuthenticatedRequest).auth;
-    const { name } = createBody.parse(req.body);
-    const result = await createPlayerClub(user.id, name);
+    const { name, kit } = createBody.parse(req.body);
+    const result = await createPlayerClub(user.id, name, kit);
     res.status(201).json({ data: result });
   } catch (err) {
     next(err);

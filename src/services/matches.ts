@@ -9,10 +9,15 @@ import {
   playerMatchStats,
   playerSeasonStats,
   players,
+  DEFAULT_CLUB_KIT,
+  type ClubKit,
   type PlayerAppearance,
 } from "../db/schema.js";
 import { getOpenWorldOrThrow } from "../game/bootstrap.js";
-import { botAppearanceFor } from "../game/clubCatalog.js";
+import {
+  applyKitToAppearance,
+  botAppearanceFor,
+} from "../game/clubCatalog.js";
 import { matchFameFromStats } from "../game/fameCatalog.js";
 import { TIREDNESS_MAX, tirednessFromMatch } from "../game/constants.js";
 import {
@@ -46,19 +51,26 @@ function asAppearance(
   raw: unknown,
   clubName: string,
   index: number,
+  kit: ClubKit,
 ): Record<string, unknown> {
-  if (raw && typeof raw === "object" && "gender" in (raw as object)) {
-    return raw as Record<string, unknown>;
-  }
-  return botAppearanceFor(clubName, index) as unknown as Record<string, unknown>;
+  const base =
+    raw && typeof raw === "object" && "gender" in (raw as object)
+      ? (raw as PlayerAppearance)
+      : botAppearanceFor(clubName, index, kit);
+  return applyKitToAppearance(base, kit, clubName) as unknown as Record<
+    string,
+    unknown
+  >;
 }
 
 async function loadClubSquad(
   clubId: string,
   clubName: string,
   side: "home" | "away",
+  kit: ClubKit,
   human?: { id: string; name: string; position: string; appearance: PlayerAppearance; playingStrength: number } | null,
 ): Promise<{ actors: MatchActor[]; public: MatchSquadPlayer[] }> {
+  const strip = kit ?? DEFAULT_CLUB_KIT;
   const bots = await db.query.botPlayers.findMany({
     where: eq(botPlayers.clubId, clubId),
   });
@@ -80,7 +92,7 @@ async function loadClubSquad(
       slot: b.slot,
       position: b.position,
       playingStrength: b.playingStrength,
-      appearance: asAppearance(b.appearance, clubName, i),
+      appearance: asAppearance(b.appearance, clubName, i, strip),
       kind: "bot" as const,
     }));
 
@@ -103,7 +115,11 @@ async function loadClubSquad(
         slot: starters[replaceAt]!.slot,
         position: human.position,
         playingStrength: human.playingStrength,
-        appearance: human.appearance as unknown as Record<string, unknown>,
+        appearance: applyKitToAppearance(
+          human.appearance,
+          strip,
+          clubName,
+        ) as unknown as Record<string, unknown>,
         kind: "human",
       };
     }
@@ -117,7 +133,7 @@ async function loadClubSquad(
       slot: b.slot,
       position: b.position,
       playingStrength: b.playingStrength,
-      appearance: asAppearance(b.appearance, clubName, starters.length),
+      appearance: asAppearance(b.appearance, clubName, starters.length, strip),
       kind: "bot",
     });
   }
@@ -162,7 +178,8 @@ export async function startTestMatch(userId: string) {
 
   const myClub = membership.club;
 
-  await ensureClubBots(myClub.id, myClub.name, myClub.tier);
+  const homeKit = myClub.kit ?? DEFAULT_CLUB_KIT;
+  await ensureClubBots(myClub.id, myClub.name, myClub.tier, homeKit);
 
   const opponents = await db.query.clubs.findMany({
     where: and(
@@ -177,16 +194,23 @@ export async function startTestMatch(userId: string) {
   }
 
   const awayClub = opponents[Math.floor(Math.random() * opponents.length)]!;
-  await ensureClubBots(awayClub.id, awayClub.name, awayClub.tier);
+  const awayKit = awayClub.kit ?? DEFAULT_CLUB_KIT;
+  await ensureClubBots(awayClub.id, awayClub.name, awayClub.tier, awayKit);
 
-  const homePack = await loadClubSquad(myClub.id, myClub.name, "home", {
+  const homePack = await loadClubSquad(myClub.id, myClub.name, "home", homeKit, {
     id: player.id,
     name: player.displayName,
     position: player.position,
     appearance: player.appearance,
     playingStrength: player.playingStrength,
   });
-  const awayPack = await loadClubSquad(awayClub.id, awayClub.name, "away", null);
+  const awayPack = await loadClubSquad(
+    awayClub.id,
+    awayClub.name,
+    "away",
+    awayKit,
+    null,
+  );
 
   const seed = `${myClub.id}:${awayClub.id}:${Date.now()}`;
   const sim = simulateMatch(homePack.actors, awayPack.actors, seed);
@@ -402,8 +426,10 @@ export async function playFixture(userId: string, fixtureId: string) {
     throw new AppError(500, "Clubs missing", "CLUBS_MISSING");
   }
 
-  await ensureClubBots(homeClub.id, homeClub.name, homeClub.tier);
-  await ensureClubBots(awayClub.id, awayClub.name, awayClub.tier);
+  const homeKit = homeClub.kit ?? DEFAULT_CLUB_KIT;
+  const awayKit = awayClub.kit ?? DEFAULT_CLUB_KIT;
+  await ensureClubBots(homeClub.id, homeClub.name, homeClub.tier, homeKit);
+  await ensureClubBots(awayClub.id, awayClub.name, awayClub.tier, awayKit);
 
   const homeHumans = await humansOnClub(homeClub.id);
   const awayHumans = await humansOnClub(awayClub.id);
@@ -412,12 +438,14 @@ export async function playFixture(userId: string, fixtureId: string) {
     homeClub.id,
     homeClub.name,
     "home",
+    homeKit,
     homeHumans[0] ?? null,
   );
   const awayPack = await loadClubSquad(
     awayClub.id,
     awayClub.name,
     "away",
+    awayKit,
     awayHumans[0] ?? null,
   );
 

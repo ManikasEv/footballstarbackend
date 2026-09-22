@@ -215,7 +215,7 @@ export const SPA_ITEMS: SpaItem[] = [
   {
     id: "quick_rinse",
     label: "Quick rinse",
-    blurb: "Cold water splash — take the edge off.",
+    blurb: "A cold splash. A fresh start.",
     coinCost: 25,
     starCost: 0,
     tirednessRestore: 12,
@@ -224,7 +224,7 @@ export const SPA_ITEMS: SpaItem[] = [
   {
     id: "steam_room",
     label: "Steam room",
-    blurb: "Twenty minutes of heat and quiet.",
+    blurb: "Warm up. Wind down.",
     coinCost: 55,
     starCost: 0,
     tirednessRestore: 28,
@@ -233,7 +233,7 @@ export const SPA_ITEMS: SpaItem[] = [
   {
     id: "deep_tissue",
     label: "Deep tissue",
-    blurb: "Physio table — serious recovery.",
+    blurb: "Give those match legs a break.",
     coinCost: 0,
     starCost: 2,
     tirednessRestore: 50,
@@ -242,7 +242,7 @@ export const SPA_ITEMS: SpaItem[] = [
   {
     id: "full_spa_day",
     label: "Full spa day",
-    blurb: "Wipe tiredness completely.",
+    blurb: "Leave every bit of tiredness behind.",
     coinCost: 0,
     starCost: 5,
     tirednessRestore: 100,

@@ -1,9 +1,11 @@
 import type {
+  ClubKit,
   LeagueTier,
   PlayerAppearance,
   PlayerPosition,
   SquadSlot,
 } from "../db/schema.js";
+import { DEFAULT_CLUB_KIT } from "../db/schema.js";
 
 /** 4-4-2 first XI + 11 bench = 22 bots (max squad capacity). */
 export type SquadTemplateSlot = {
@@ -255,12 +257,74 @@ const FACIAL = [
   "short_boxed",
 ] as const;
 const SHIRTS = ["home", "solid", "vertical", "hoops", "diagonal", "halves"] as const;
+const COLOURS = [
+  "colour-1",
+  "colour-2",
+  "colour-3",
+  "colour-4",
+  "colour-5",
+] as const;
+const BADGE_STYLES = ["shield", "circle", "diamond"] as const;
+const BADGE_PRIMARY = [
+  "#1e4a8c",
+  "#8b1a1a",
+  "#1a6b3a",
+  "#5b2d8e",
+  "#c45c12",
+  "#102a43",
+] as const;
+const BADGE_SECONDARY = [
+  "#f0b429",
+  "#ffffff",
+  "#e8eef5",
+  "#f5c518",
+  "#7ec8ff",
+] as const;
+
+/** Deterministic kit for NPC clubs so the whole squad shares a strip. */
+export function clubKitFor(clubName: string): ClubKit {
+  const rng = mulberry32(hash(`kit:${clubName}`));
+  const pick = <T,>(arr: readonly T[]) =>
+    arr[Math.floor(rng() * arr.length)]!;
+  const words = clubName
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w[0]!.toUpperCase());
+  const initials =
+    words.length >= 2
+      ? `${words[0]}${words[1]}`.slice(0, 3)
+      : clubName.slice(0, 2).toUpperCase();
+  return {
+    shirtPatternId: pick(SHIRTS),
+    shortsColourId: pick(COLOURS),
+    socksColourId: pick(COLOURS),
+    badgeStyle: pick(BADGE_STYLES),
+    badgePrimary: pick(BADGE_PRIMARY),
+    badgeSecondary: pick(BADGE_SECONDARY),
+    badgeInitials: initials || DEFAULT_CLUB_KIT.badgeInitials,
+  };
+}
+
+export function applyKitToAppearance(
+  appearance: PlayerAppearance,
+  kit: ClubKit,
+  clubName?: string,
+): PlayerAppearance {
+  return {
+    ...appearance,
+    shirtPatternId: kit.shirtPatternId,
+    shortsColourId: kit.shortsColourId,
+    socksColourId: kit.socksColourId,
+    kitId: kit.shirtPatternId,
+    ...(clubName !== undefined ? { clubName } : {}),
+  };
+}
 
 /** Deterministic illustrated look for a bot (same catalog as real players). */
 export function botAppearanceFor(
   clubName: string,
   index: number,
-  shirtPatternId = "home",
+  kit?: ClubKit,
 ): PlayerAppearance {
   const rng = mulberry32(hash(`look:${clubName}:${index}`));
   const pick = <T,>(arr: readonly T[]) =>
@@ -270,6 +334,7 @@ export function botAppearanceFor(
   const skinToneId = pick(SKINS);
   const hairColorId = pick(HAIR_COLORS);
   const facialHairId = pick(FACIAL);
+  const strip = kit ?? clubKitFor(clubName);
 
   return {
     schemaVersion: 4,
@@ -284,29 +349,11 @@ export function botAppearanceFor(
     mouthStyleId: pick(MOUTHS),
     facialHairId,
     accessoryIds: [],
-    shirtPatternId: shirtPatternId === "home" ? pick(SHIRTS) : shirtPatternId,
-    shortsColourId: pick([
-      "colour-1",
-      "colour-2",
-      "colour-3",
-      "colour-4",
-      "colour-5",
-    ] as const),
-    socksColourId: pick([
-      "colour-1",
-      "colour-2",
-      "colour-3",
-      "colour-4",
-      "colour-5",
-    ] as const),
-    bootsColourId: pick([
-      "colour-1",
-      "colour-2",
-      "colour-3",
-      "colour-4",
-      "colour-5",
-    ] as const),
-    kitId: "home",
+    shirtPatternId: strip.shirtPatternId,
+    shortsColourId: strip.shortsColourId,
+    socksColourId: strip.socksColourId,
+    bootsColourId: pick(COLOURS),
+    kitId: strip.shirtPatternId,
     clubName,
     clubRole: null,
     skinColour: "medium",

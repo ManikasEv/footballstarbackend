@@ -24,6 +24,7 @@ import {
   botAppearanceFor,
   botNameFor,
   botStrengthFor,
+  clubKitFor,
   systemNamesForDivision,
 } from "../game/clubCatalog.js";
 import {
@@ -34,6 +35,8 @@ import {
   leaguePlaceFame,
 } from "../game/fameCatalog.js";
 import { AppError } from "../middleware/error.js";
+import type { ClubKit } from "../db/schema.js";
+import { DEFAULT_CLUB_KIT } from "../db/schema.js";
 
 const LEAGUE_MATCHDAYS = 14;
 
@@ -41,7 +44,9 @@ async function insertBotSquad(
   clubId: string,
   clubName: string,
   tier: LeagueTier,
+  kit?: ClubKit,
 ) {
+  const strip = kit ?? clubKitFor(clubName);
   await db.insert(botPlayers).values(
     SQUAD_442.map((slot, index) => ({
       clubId,
@@ -51,7 +56,7 @@ async function insertBotSquad(
       isStarter: slot.starter ? 1 : 0,
       playingStrength: botStrengthFor(tier, clubName, index),
       tirednessCurrent: 0,
-      appearance: botAppearanceFor(clubName, index),
+      appearance: botAppearanceFor(clubName, index, strip),
     })),
   );
 }
@@ -60,6 +65,7 @@ export async function ensureClubBots(
   clubId: string,
   clubName: string,
   tier: LeagueTier,
+  kit?: ClubKit,
 ) {
   const botCount = await db
     .select({ n: sql<number>`count(*)::int` })
@@ -67,7 +73,7 @@ export async function ensureClubBots(
     .where(eq(botPlayers.clubId, clubId));
   if ((botCount[0]?.n ?? 0) >= MAX_SQUAD_SIZE) return;
   await db.delete(botPlayers).where(eq(botPlayers.clubId, clubId));
-  await insertBotSquad(clubId, clubName, tier);
+  await insertBotSquad(clubId, clubName, tier, kit);
 }
 
 function nextSaturday(from: Date): Date {
@@ -124,11 +130,12 @@ async function createSystemClub(
   name: string,
   tier: LeagueTier,
 ): Promise<Club> {
+  const kit = clubKitFor(name);
   const existing = await db.query.clubs.findFirst({
     where: and(eq(clubs.worldId, worldId), eq(clubs.name, name)),
   });
   if (existing) {
-    await ensureClubBots(existing.id, existing.name, tier);
+    await ensureClubBots(existing.id, existing.name, tier, existing.kit ?? kit);
     if (existing.tier !== tier) {
       await db.update(clubs).set({ tier }).where(eq(clubs.id, existing.id));
       return { ...existing, tier };
@@ -137,9 +144,9 @@ async function createSystemClub(
   }
   const [club] = await db
     .insert(clubs)
-    .values({ worldId, name, tier, isSystem: 1 })
+    .values({ worldId, name, tier, isSystem: 1, kit })
     .returning();
-  await insertBotSquad(club!.id, name, tier);
+  await insertBotSquad(club!.id, name, tier, kit);
   return club!;
 }
 
@@ -425,8 +432,21 @@ export async function openNewBronzeDivision(seasonId: string, worldId: string) {
 export async function claimBronzeClubSlot(
   worldId: string,
   newName: string,
+  kitInput?: Partial<ClubKit>,
 ): Promise<{ club: Club; season: Season; leagueGroupId: string }> {
   const season = await ensureActiveSeason(worldId);
+  const baseKit = clubKitFor(newName);
+  const kit: ClubKit = {
+    ...DEFAULT_CLUB_KIT,
+    ...baseKit,
+    ...kitInput,
+    badgeInitials: (
+      kitInput?.badgeInitials ??
+      baseKit.badgeInitials
+    )
+      .slice(0, 3)
+      .toUpperCase(),
+  };
 
   const nameTaken = await db.query.clubs.findFirst({
     where: and(eq(clubs.worldId, worldId), eq(clubs.name, newName)),
@@ -457,11 +477,11 @@ export async function claimBronzeClubSlot(
         }
         const [updated] = await db
           .update(clubs)
-          .set({ name: newName, isSystem: 0, tier: "bronze" })
+          .set({ name: newName, isSystem: 0, tier: "bronze", kit })
           .where(eq(clubs.id, club.id))
           .returning();
         await db.delete(botPlayers).where(eq(botPlayers.clubId, club.id));
-        await insertBotSquad(club.id, newName, "bronze");
+        await insertBotSquad(club.id, newName, "bronze", kit);
         return { club: updated!, season, leagueGroupId: group.id };
       }
     }
@@ -471,11 +491,11 @@ export async function claimBronzeClubSlot(
   const firstId = clubIds[0]!;
   const [updated] = await db
     .update(clubs)
-    .set({ name: newName, isSystem: 0, tier: "bronze" })
+    .set({ name: newName, isSystem: 0, tier: "bronze", kit })
     .where(eq(clubs.id, firstId))
     .returning();
   await db.delete(botPlayers).where(eq(botPlayers.clubId, firstId));
-  await insertBotSquad(firstId, newName, "bronze");
+  await insertBotSquad(firstId, newName, "bronze", kit);
   return { club: updated!, season, leagueGroupId: groupId };
 }
 
