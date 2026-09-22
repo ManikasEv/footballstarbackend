@@ -3,6 +3,7 @@ import type { AuthenticatedRequest } from "../../middleware/auth.js";
 import {
   getMatch,
   getNextFixture,
+  listMyMatches,
   playFixture,
   startTestMatch,
 } from "../../services/matches.js";
@@ -14,6 +15,16 @@ matchesRouter.post("/test", async (req, res, next) => {
     const { user } = (req as AuthenticatedRequest).auth;
     const data = await startTestMatch(user.id);
     res.status(201).json({ data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+matchesRouter.get("/mine", async (req, res, next) => {
+  try {
+    const { user } = (req as AuthenticatedRequest).auth;
+    const data = await listMyMatches(user.id);
+    res.json({ data });
   } catch (err) {
     next(err);
   }

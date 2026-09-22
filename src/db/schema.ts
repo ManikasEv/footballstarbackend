@@ -176,10 +176,17 @@ export type PlayerAppearance = {
   facialHairId?: string | null;
   accessoryIds?: string[];
   shirtPatternId?: string;
+  /** Hex colours for recolouring the shirt layer */
+  shirtPrimary?: string;
+  shirtSecondary?: string;
   shortsColourId?: string;
   socksColourId?: string;
   bootsColourId?: string;
   kitId?: string;
+  badgeStyle?: "shield" | "circle" | "diamond";
+  badgePrimary?: string;
+  badgeSecondary?: string;
+  badgeInitials?: string;
   /** Legacy mirrors */
   skinColour: string;
   hairColour: string;
@@ -191,6 +198,10 @@ export type PlayerAppearance = {
 /** Shared club strip + crest — applied to every squad member. */
 export type ClubKit = {
   shirtPatternId: string;
+  /** Primary jersey dye (hex) */
+  shirtPrimary: string;
+  /** Secondary jersey dye for stripes / accents (hex) */
+  shirtSecondary: string;
   shortsColourId: string;
   socksColourId: string;
   badgeStyle: "shield" | "circle" | "diamond";
@@ -201,6 +212,8 @@ export type ClubKit = {
 
 export const DEFAULT_CLUB_KIT: ClubKit = {
   shirtPatternId: "vertical",
+  shirtPrimary: "#1e4a8c",
+  shirtSecondary: "#f0b429",
   shortsColourId: "colour-1",
   socksColourId: "colour-1",
   badgeStyle: "shield",

@@ -296,6 +296,8 @@ export function clubKitFor(clubName: string): ClubKit {
       : clubName.slice(0, 2).toUpperCase();
   return {
     shirtPatternId: pick(SHIRTS),
+    shirtPrimary: pick(BADGE_PRIMARY),
+    shirtSecondary: pick(BADGE_SECONDARY),
     shortsColourId: pick(COLOURS),
     socksColourId: pick(COLOURS),
     badgeStyle: pick(BADGE_STYLES),
@@ -313,9 +315,15 @@ export function applyKitToAppearance(
   return {
     ...appearance,
     shirtPatternId: kit.shirtPatternId,
+    shirtPrimary: kit.shirtPrimary ?? kit.badgePrimary,
+    shirtSecondary: kit.shirtSecondary ?? kit.badgeSecondary,
     shortsColourId: kit.shortsColourId,
     socksColourId: kit.socksColourId,
     kitId: kit.shirtPatternId,
+    badgeStyle: kit.badgeStyle,
+    badgePrimary: kit.badgePrimary,
+    badgeSecondary: kit.badgeSecondary,
+    badgeInitials: kit.badgeInitials,
     ...(clubName !== undefined ? { clubName } : {}),
   };
 }
@@ -350,10 +358,16 @@ export function botAppearanceFor(
     facialHairId,
     accessoryIds: [],
     shirtPatternId: strip.shirtPatternId,
+    shirtPrimary: strip.shirtPrimary,
+    shirtSecondary: strip.shirtSecondary,
     shortsColourId: strip.shortsColourId,
     socksColourId: strip.socksColourId,
     bootsColourId: pick(COLOURS),
     kitId: strip.shirtPatternId,
+    badgeStyle: strip.badgeStyle,
+    badgePrimary: strip.badgePrimary,
+    badgeSecondary: strip.badgeSecondary,
+    badgeInitials: strip.badgeInitials,
     clubName,
     clubRole: null,
     skinColour: "medium",

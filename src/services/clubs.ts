@@ -26,6 +26,19 @@ import {
   ensureClubBots,
 } from "./seasons.js";
 
+function normalizeClubKit(kit: ClubKit | null | undefined): ClubKit {
+  const base = { ...DEFAULT_CLUB_KIT, ...(kit ?? {}) };
+  return {
+    ...base,
+    shirtPrimary:
+      base.shirtPrimary || base.badgePrimary || DEFAULT_CLUB_KIT.shirtPrimary,
+    shirtSecondary:
+      base.shirtSecondary ||
+      base.badgeSecondary ||
+      DEFAULT_CLUB_KIT.shirtSecondary,
+  };
+}
+
 function appearanceWithClub(
   appearance: PlayerAppearance,
   clubName: string | null,
@@ -80,7 +93,7 @@ async function clubPublicFrom(
     botCount: botCount[0]?.n ?? 0,
     humanCount: humanCount[0]?.n ?? 0,
     squadCap: MAX_SQUAD_SIZE,
-    kit: club.kit ?? DEFAULT_CLUB_KIT,
+    kit: normalizeClubKit(club.kit),
   };
 }
 
@@ -129,7 +142,7 @@ export async function getMySquad(userId: string): Promise<{
     throw new AppError(400, "Not in a club", "NOT_IN_CLUB");
   }
   const club = membership.club;
-  const kit = club.kit ?? DEFAULT_CLUB_KIT;
+  const kit = normalizeClubKit(club.kit);
   await ensureClubBots(club.id, club.name, club.tier, kit);
 
   const bots = await db.query.botPlayers.findMany({

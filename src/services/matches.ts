@@ -602,11 +602,60 @@ export async function getMatch(matchId: string) {
       status: row.status,
       seed: row.seed,
       competition: row.competition,
+      kickoffAt: row.kickoffAt?.toISOString?.() ?? row.kickoffAt,
+      finishedAt: row.finishedAt?.toISOString?.() ?? row.finishedAt,
     },
     events: row.events as MatchEvent[],
     squads: row.squads as {
       home: MatchSquadPlayer[];
       away: MatchSquadPlayer[];
     },
+  };
+}
+
+/** Recent matches for the caller's club (league + cup + tests). */
+export async function listMyMatches(userId: string, limit = 20) {
+  const player = await db.query.players.findFirst({
+    where: eq(players.userId, userId),
+  });
+  if (!player) {
+    throw new AppError(404, "Player not found", "PLAYER_NOT_FOUND");
+  }
+  const membership = await db.query.clubMemberships.findFirst({
+    where: eq(clubMemberships.playerId, player.id),
+  });
+  if (!membership) {
+    throw new AppError(400, "Not in a club", "NOT_IN_CLUB");
+  }
+
+  const rows = await db
+    .select()
+    .from(matches)
+    .where(
+      or(
+        eq(matches.homeClubId, membership.clubId),
+        eq(matches.awayClubId, membership.clubId),
+      ),
+    )
+    .orderBy(sql`${matches.kickoffAt} desc nulls last`)
+    .limit(Math.min(50, Math.max(1, limit)));
+
+  return {
+    matches: rows.map((row) => ({
+      id: row.id,
+      homeName: row.homeName,
+      awayName: row.awayName,
+      homeScore: row.homeScore,
+      awayScore: row.awayScore,
+      isTest: row.isTest === 1,
+      competition: row.competition,
+      status: row.status,
+      kickoffAt: row.kickoffAt?.toISOString?.() ?? null,
+      finishedAt: row.finishedAt?.toISOString?.() ?? null,
+      usSide:
+        row.homeClubId === membership.clubId
+          ? ("home" as const)
+          : ("away" as const),
+    })),
   };
 }

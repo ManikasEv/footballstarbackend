@@ -259,24 +259,39 @@ export function simulateMatch(
     const foes = team(other(possession));
     const dir = attackToward(possession);
 
-    const roll = rng();
+    const foeSample = pick(rng, foes);
     const strength =
       carrier.playingStrength /
-      (carrier.playingStrength + pick(rng, foes).playingStrength);
+      (carrier.playingStrength + foeSample.playingStrength + 1);
+    // Stronger attackers push the ball forward more often; weak sides recycle possession.
+    const passBias = 0.28 + strength * 0.22;
+    const dribbleBias = passBias + 0.16 + strength * 0.1;
+    const duelBias = dribbleBias + 0.14;
+    const roll = rng();
 
     // Ball near carrier, nudged toward goal
     const ball = {
-      x: clamp(carrier.baseX + dir * (8 + rng() * 12), 4, 96),
-      y: clamp(carrier.baseY + (rng() - 0.5) * 16, 8, 92),
+      x: clamp(carrier.baseX + dir * (6 + rng() * 14), 4, 96),
+      y: clamp(carrier.baseY + (rng() - 0.5) * 18, 8, 92),
     };
 
-    if (roll < 0.42 && mates.length) {
-      const target = pick(rng, mates);
+    if (roll < passBias && mates.length) {
+      // Prefer higher-PS teammates for progressive passes
+      const ranked = [...mates].sort(
+        (a, b) => b.playingStrength - a.playingStrength,
+      );
+      const target =
+        rng() < 0.55
+          ? ranked[Math.floor(rng() * Math.min(3, ranked.length))]!
+          : pick(rng, mates);
       push(
         minute,
         "pass",
         carrier,
-        { x: (carrier.baseX + target.baseX) / 2, y: (carrier.baseY + target.baseY) / 2 },
+        {
+          x: (carrier.baseX + target.baseX) / 2,
+          y: (carrier.baseY + target.baseY) / 2,
+        },
         `${carrier.name} finds ${target.name}.`,
         { targetId: target.id, targetName: target.name },
       );
@@ -284,7 +299,8 @@ export function simulateMatch(
       cs.assists += rng() < 0.08 ? 1 : 0;
       cs.rating = Math.min(10, cs.rating + 0.05);
       carrier = target;
-    } else if (roll < 0.62) {
+    } else if (roll < dribbleBias) {
+      const step = 3 + strength * 8 + rng() * 4;
       push(
         minute,
         "dribble",
@@ -294,14 +310,17 @@ export function simulateMatch(
       );
       carrier = {
         ...carrier,
-        baseX: clamp(carrier.baseX + dir * (4 + rng() * 6), 8, 92),
+        baseX: clamp(carrier.baseX + dir * step, 8, 92),
       };
-    } else if (roll < 0.78) {
+    } else if (roll < duelBias) {
       const defender = pick(
         rng,
         foes.filter((p) => p.slot !== "gk"),
       );
-      if (rng() > strength) {
+      const tackleChance =
+        defender.playingStrength /
+        (defender.playingStrength + carrier.playingStrength + 1);
+      if (rng() < tackleChance) {
         push(
           minute,
           "tackle",
@@ -323,20 +342,18 @@ export function simulateMatch(
         );
       }
     } else {
-      // Shot
+      // Shot — finishing chance scales with attacker PS vs GK
       const gk = foes.find((p) => p.slot === "gk") ?? pick(rng, foes);
       const goalX = possession === "home" ? 96 : 4;
       const shotBall = { x: goalX, y: 42 + rng() * 16 };
-      push(
-        minute,
-        "shot",
-        carrier,
-        shotBall,
-        `${carrier.name} shoots!`,
-      );
+      push(minute, "shot", carrier, shotBall, `${carrier.name} shoots!`);
       ensureStat(carrier, true).shots += 1;
 
-      const finishChance = 0.18 + strength * 0.22;
+      const finishChance =
+        0.12 +
+        (carrier.playingStrength /
+          (carrier.playingStrength + gk.playingStrength + 1)) *
+          0.38;
       if (rng() < finishChance) {
         if (possession === "home") homeScore += 1;
         else awayScore += 1;
@@ -365,7 +382,7 @@ export function simulateMatch(
           { x: 50, y: 50 },
           `Restart after the goal.`,
         );
-      } else if (rng() < 0.55) {
+      } else if (rng() < 0.5 + gk.playingStrength / 800) {
         push(
           minute,
           "save",
@@ -406,7 +423,9 @@ export function simulateMatch(
       }
     }
 
-    minute += 1 + Math.floor(rng() * 2);
+    // Stronger teams advance the clock slower (more actions) — weak sides skip ahead
+    const tempo = 1 + Math.floor(rng() * (strength > 0.55 ? 2 : 3));
+    minute += tempo;
   }
 
   const closer = pick(rng, [...home, ...away]);

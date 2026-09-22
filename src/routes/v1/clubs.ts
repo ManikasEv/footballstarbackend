@@ -128,6 +128,8 @@ const createBody = z.object({
         "diagonal",
         "halves",
       ]),
+      shirtPrimary: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+      shirtSecondary: z.string().regex(/^#[0-9a-fA-F]{6}$/),
       shortsColourId: z.string().regex(/^colour-[1-5]$/),
       socksColourId: z.string().regex(/^colour-[1-5]$/),
       badgeStyle: z.enum(["shield", "circle", "diamond"]),
