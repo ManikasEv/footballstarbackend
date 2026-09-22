@@ -429,7 +429,7 @@ export const clubMemberships = pgTable(
   ],
 );
 
-/** NPC squad members (15 per club for 4-4-2 + bench). */
+/** NPC squad members (22 per club — max squad capacity). */
 export const botPlayers = pgTable(
   "bot_players",
   {
@@ -443,11 +443,273 @@ export const botPlayers = pgTable(
     isStarter: integer("is_starter").notNull().default(1),
     playingStrength: integer("playing_strength").notNull().default(100),
     tirednessCurrent: integer("tiredness_current").notNull().default(0),
+    /** Illustrated look — same shape as player appearance (kit/face/hair). */
+    appearance: jsonb("appearance").$type<PlayerAppearance>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
   },
   (table) => [index("bot_players_club_id_idx").on(table.clubId)],
+);
+
+export const seasonStatusEnum = pgEnum("season_status", [
+  "active",
+  "ended",
+]);
+
+export const competitionEnum = pgEnum("competition", ["league", "cup"]);
+
+export const fixtureStatusEnum = pgEnum("fixture_status", [
+  "scheduled",
+  "playing",
+  "finished",
+]);
+
+export const cupCodeEnum = pgEnum("cup_code", [
+  "bronze_silver",
+  "gold_platinum",
+  "diamond_champion",
+]);
+
+/** World season clock — championship + cups share one season. */
+export const seasons = pgTable(
+  "seasons",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    worldId: uuid("world_id")
+      .notNull()
+      .references(() => worlds.id),
+    number: integer("number").notNull().default(1),
+    status: seasonStatusEnum("status").notNull().default("active"),
+    startsAt: timestamp("starts_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("seasons_world_id_idx").on(table.worldId),
+    uniqueIndex("seasons_world_number_uidx").on(table.worldId, table.number),
+  ],
+);
+
+/** One table of 8 clubs at a tier (Bronze League 1, Bronze League 2, …). */
+export const leagueGroups = pgTable(
+  "league_groups",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    seasonId: uuid("season_id")
+      .notNull()
+      .references(() => seasons.id, { onDelete: "cascade" }),
+    tier: leagueTierEnum("tier").notNull(),
+    divisionIndex: integer("division_index").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("league_groups_season_tier_div_uidx").on(
+      table.seasonId,
+      table.tier,
+      table.divisionIndex,
+    ),
+    index("league_groups_season_id_idx").on(table.seasonId),
+  ],
+);
+
+export const leagueGroupClubs = pgTable(
+  "league_group_clubs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    leagueGroupId: uuid("league_group_id")
+      .notNull()
+      .references(() => leagueGroups.id, { onDelete: "cascade" }),
+    clubId: uuid("club_id")
+      .notNull()
+      .references(() => clubs.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    uniqueIndex("league_group_clubs_group_club_uidx").on(
+      table.leagueGroupId,
+      table.clubId,
+    ),
+    index("league_group_clubs_group_id_idx").on(table.leagueGroupId),
+    index("league_group_clubs_club_id_idx").on(table.clubId),
+  ],
+);
+
+export const cups = pgTable(
+  "cups",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    seasonId: uuid("season_id")
+      .notNull()
+      .references(() => seasons.id, { onDelete: "cascade" }),
+    code: cupCodeEnum("code").notNull(),
+    status: text("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("cups_season_code_uidx").on(table.seasonId, table.code),
+    index("cups_season_id_idx").on(table.seasonId),
+  ],
+);
+
+export const fixtures = pgTable(
+  "fixtures",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    seasonId: uuid("season_id")
+      .notNull()
+      .references(() => seasons.id, { onDelete: "cascade" }),
+    competition: competitionEnum("competition").notNull(),
+    leagueGroupId: uuid("league_group_id").references(() => leagueGroups.id, {
+      onDelete: "cascade",
+    }),
+    cupId: uuid("cup_id").references(() => cups.id, { onDelete: "cascade" }),
+    /** League matchday 1–14, or cup round size 16/8/4/2. */
+    round: integer("round").notNull(),
+    /** Cup leg 1 or 2; league always 1. */
+    leg: integer("leg").notNull().default(1),
+    homeClubId: uuid("home_club_id")
+      .notNull()
+      .references(() => clubs.id),
+    awayClubId: uuid("away_club_id")
+      .notNull()
+      .references(() => clubs.id),
+    kickoffAt: timestamp("kickoff_at", { withTimezone: true }).notNull(),
+    status: fixtureStatusEnum("status").notNull().default("scheduled"),
+    homeScore: integer("home_score"),
+    awayScore: integer("away_score"),
+    matchId: uuid("match_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("fixtures_season_id_idx").on(table.seasonId),
+    index("fixtures_home_club_id_idx").on(table.homeClubId),
+    index("fixtures_away_club_id_idx").on(table.awayClubId),
+    index("fixtures_status_idx").on(table.status),
+    index("fixtures_kickoff_at_idx").on(table.kickoffAt),
+  ],
+);
+
+/** Server-authoritative match timeline (watching is presentation only). */
+export const matches = pgTable(
+  "matches",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    worldId: uuid("world_id")
+      .notNull()
+      .references(() => worlds.id),
+    fixtureId: uuid("fixture_id"),
+    homeClubId: uuid("home_club_id")
+      .notNull()
+      .references(() => clubs.id),
+    awayClubId: uuid("away_club_id")
+      .notNull()
+      .references(() => clubs.id),
+    homeName: text("home_name").notNull(),
+    awayName: text("away_name").notNull(),
+    status: text("status").notNull().default("scheduled"),
+    isTest: integer("is_test").notNull().default(0),
+    competition: text("competition").notNull().default("test"),
+    seed: text("seed").notNull(),
+    homeScore: integer("home_score").notNull().default(0),
+    awayScore: integer("away_score").notNull().default(0),
+    /** Full event log — same whether anyone watches live. */
+    events: jsonb("events").$type<unknown[]>().notNull().default([]),
+    squads: jsonb("squads").$type<Record<string, unknown>>().notNull().default({}),
+    /** Per-actor performance for fame. */
+    actorStats: jsonb("actor_stats").$type<unknown[]>().notNull().default([]),
+    kickoffAt: timestamp("kickoff_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("matches_world_id_idx").on(table.worldId),
+    index("matches_status_idx").on(table.status),
+    index("matches_fixture_id_idx").on(table.fixtureId),
+  ],
+);
+
+export const playerMatchStats = pgTable(
+  "player_match_stats",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    matchId: uuid("match_id")
+      .notNull()
+      .references(() => matches.id, { onDelete: "cascade" }),
+    fixtureId: uuid("fixture_id"),
+    seasonId: uuid("season_id").references(() => seasons.id),
+    playerId: uuid("player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    clubId: uuid("club_id")
+      .notNull()
+      .references(() => clubs.id),
+    competition: text("competition").notNull(),
+    minutes: integer("minutes").notNull().default(0),
+    goals: integer("goals").notNull().default(0),
+    assists: integer("assists").notNull().default(0),
+    shots: integer("shots").notNull().default(0),
+    rating: integer("rating").notNull().default(5),
+    wasStarter: integer("was_starter").notNull().default(0),
+    wasSub: integer("was_sub").notNull().default(0),
+    fameAwarded: integer("fame_awarded").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("player_match_stats_player_id_idx").on(table.playerId),
+    index("player_match_stats_season_id_idx").on(table.seasonId),
+    uniqueIndex("player_match_stats_match_player_uidx").on(
+      table.matchId,
+      table.playerId,
+    ),
+  ],
+);
+
+export const playerSeasonStats = pgTable(
+  "player_season_stats",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    seasonId: uuid("season_id")
+      .notNull()
+      .references(() => seasons.id, { onDelete: "cascade" }),
+    playerId: uuid("player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    clubId: uuid("club_id")
+      .notNull()
+      .references(() => clubs.id),
+    leagueAppearances: integer("league_appearances").notNull().default(0),
+    cupAppearances: integer("cup_appearances").notNull().default(0),
+    goals: integer("goals").notNull().default(0),
+    assists: integer("assists").notNull().default(0),
+    matchFame: integer("match_fame").notNull().default(0),
+    placeFame: integer("place_fame").notNull().default(0),
+    cupFame: integer("cup_fame").notNull().default(0),
+    placeFamePaid: integer("place_fame_paid").notNull().default(0),
+    cupFamePaid: integer("cup_fame_paid").notNull().default(0),
+  },
+  (table) => [
+    uniqueIndex("player_season_stats_season_player_uidx").on(
+      table.seasonId,
+      table.playerId,
+    ),
+    index("player_season_stats_player_id_idx").on(table.playerId),
+  ],
 );
 
 // ---------------------------------------------------------------------------
@@ -591,10 +853,19 @@ export type PlayerTrainingChain = typeof playerTrainingChain.$inferSelect;
 export type Club = typeof clubs.$inferSelect;
 export type ClubMembership = typeof clubMemberships.$inferSelect;
 export type BotPlayer = typeof botPlayers.$inferSelect;
+export type Match = typeof matches.$inferSelect;
+export type Season = typeof seasons.$inferSelect;
+export type LeagueGroup = typeof leagueGroups.$inferSelect;
+export type Fixture = typeof fixtures.$inferSelect;
+export type Cup = typeof cups.$inferSelect;
+export type PlayerMatchStat = typeof playerMatchStats.$inferSelect;
+export type PlayerSeasonStat = typeof playerSeasonStats.$inferSelect;
 export type PlayerPosition = (typeof playerPositionEnum.enumValues)[number];
 export type SkillCode = (typeof skillCodeEnum.enumValues)[number];
 export type LeagueTier = (typeof leagueTierEnum.enumValues)[number];
 export type SquadSlot = (typeof squadSlotEnum.enumValues)[number];
+export type CupCode = (typeof cupCodeEnum.enumValues)[number];
+export type Competition = (typeof competitionEnum.enumValues)[number];
 export type TrainingChainColor =
   (typeof trainingChainColorEnum.enumValues)[number];
 export type TrainingOfferKind =
