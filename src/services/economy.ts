@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   auditLogs,
@@ -9,7 +9,6 @@ import {
 } from "../db/schema.js";
 import {
   ENDURANCE_MAX,
-  POSITION_SKILLS,
   applyEnduranceRegen,
   applyTirednessRegen,
   computePlayingStrength,
@@ -21,6 +20,7 @@ import {
   STAR_PACKS,
   WORK_JOBS,
 } from "../game/economyCatalog.js";
+import { applyGearBonusesToSkills } from "../game/gearCatalog.js";
 import { AppError } from "../middleware/error.js";
 import { getPlayerByUserId, type PlayerPublic } from "./players.js";
 
@@ -60,11 +60,6 @@ async function loadPlayer(userId: string): Promise<Player> {
 function appearanceRecord(player: Player): Record<string, unknown> {
   const a = player.appearance;
   return a && typeof a === "object" ? { ...(a as Record<string, unknown>) } : {};
-}
-
-function unlockedHairIds(player: Player): string[] {
-  const raw = appearanceRecord(player).unlockedHairIds;
-  return Array.isArray(raw) ? raw.map(String) : [];
 }
 
 export function getEconomyCatalog() {
@@ -137,85 +132,59 @@ export async function buyShopItem(
     throw new AppError(400, "Not enough currency", "INSUFFICIENT_FUNDS");
   }
 
-  const now = new Date();
-  let coins = player.coins - item.coinCost;
-  let stars = player.stars - item.starCost;
   const appearance = appearanceRecord(player);
-  let skillBump: { skill: SkillCode; gain: number } | null = null;
-
-  if (item.kind === "boost_coins") {
-    coins += 60;
-  } else if (item.kind === "boost_skill") {
-    const gain = item.skillGain ?? 2;
-    const skills = POSITION_SKILLS[player.position];
-    const skill = skills[Math.floor(Math.random() * skills.length)]!;
-    const row = await db.query.playerSkillValues.findFirst({
-      where: and(
-        eq(playerSkillValues.playerId, player.id),
-        eq(playerSkillValues.skillCode, skill),
-      ),
-    });
-    const nextVal = (row?.value ?? 10) + gain;
-    if (row) {
-      await db
-        .update(playerSkillValues)
-        .set({ value: nextVal, updatedAt: now })
-        .where(eq(playerSkillValues.id, row.id));
-    } else {
-      await db.insert(playerSkillValues).values({
-        playerId: player.id,
-        skillCode: skill,
-        value: nextVal,
-      });
-    }
-    skillBump = { skill, gain };
-    const all = await db.query.playerSkillValues.findMany({
-      where: eq(playerSkillValues.playerId, player.id),
-    });
-    const map = {} as Record<SkillCode, number>;
-    for (const r of all) map[r.skillCode] = r.value;
-    if (skillBump) map[skill] = nextVal;
-    const playingStrength = computePlayingStrength(player.position, map);
-    await db
-      .update(players)
-      .set({
-        coins,
-        stars,
-        playingStrength,
-        updatedAt: now,
-      })
-      .where(eq(players.id, player.id));
-  } else if (item.kind === "unlock_hair" && item.hairStyleId) {
-    const unlocked = new Set(unlockedHairIds(player));
-    if (unlocked.has(item.hairStyleId)) {
-      throw new AppError(400, "Already unlocked", "ALREADY_OWNED");
-    }
-    unlocked.add(item.hairStyleId);
-    appearance.unlockedHairIds = [...unlocked];
-    await db
-      .update(players)
-      .set({
-        coins,
-        stars,
-        appearance: appearance as Player["appearance"],
-        updatedAt: now,
-      })
-      .where(eq(players.id, player.id));
+  const ownedRaw = appearance.ownedGear;
+  const ownedGear = Array.isArray(ownedRaw) ? ownedRaw.map(String) : [];
+  if (ownedGear.includes(item.id)) {
+    throw new AppError(400, "Already owned", "ALREADY_OWNED");
   }
 
-  if (item.kind === "boost_coins") {
-    await db
-      .update(players)
-      .set({ coins, stars, updatedAt: now })
-      .where(eq(players.id, player.id));
+  const now = new Date();
+  const coins = player.coins - item.coinCost;
+  const stars = player.stars - item.starCost;
+  ownedGear.push(item.id);
+  appearance.ownedGear = ownedGear;
+
+  const equippedRaw =
+    appearance.equipped && typeof appearance.equipped === "object"
+      ? (appearance.equipped as Record<string, unknown>)
+      : {};
+  if (!equippedRaw[item.slot]) {
+    equippedRaw[item.slot] = item.id;
   }
+  appearance.equipped = equippedRaw;
+
+  // Kit boosts apply while equipped — do not permanently bake into skill rows.
+  const all = await db.query.playerSkillValues.findMany({
+    where: eq(playerSkillValues.playerId, player.id),
+  });
+  const map = {} as Record<SkillCode, number>;
+  for (const r of all) map[r.skillCode] = r.value;
+  const withGear = applyGearBonusesToSkills(map, appearance.equipped);
+  const playingStrength = computePlayingStrength(player.position, withGear);
+
+  await db
+    .update(players)
+    .set({
+      coins,
+      stars,
+      playingStrength,
+      appearance: appearance as Player["appearance"],
+      updatedAt: now,
+    })
+    .where(eq(players.id, player.id));
 
   await db.insert(auditLogs).values({
     actorUserId: userId,
     action: "economy.shop",
     entityType: "player",
     entityId: player.id,
-    metadata: { itemId: item.id, skillBump },
+    metadata: {
+      itemId: item.id,
+      slot: item.slot,
+      skillGain: item.skillGain,
+      skillCode: item.skillCode,
+    },
   });
 
   const pub = await getPlayerByUserId(userId);

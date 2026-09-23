@@ -1,5 +1,8 @@
 /** Static catalogs for Work / Store / Fitness / Stars — server-authoritative prices. */
 
+import type { SkillCode } from "../db/schema.js";
+import { GEAR_SHOP_ITEMS } from "./gearCatalog.js";
+
 export type WorkJob = {
   id: string;
   label: string;
@@ -16,11 +19,10 @@ export type ShopItem = {
   blurb: string;
   coinCost: number;
   starCost: number;
-  kind: "boost_coins" | "boost_skill" | "unlock_hair";
-  /** For boost_skill — random relevant skill bump size */
-  skillGain?: number;
-  /** For unlock_hair */
-  hairStyleId?: string;
+  kind: "gear";
+  slot: "shirt" | "shorts" | "socks" | "boots" | "special";
+  skillCode: SkillCode;
+  skillGain: number;
   accent: "blue" | "orange" | "green" | "purple";
 };
 
@@ -83,57 +85,7 @@ export const WORK_JOBS: WorkJob[] = [
   },
 ];
 
-export const SHOP_ITEMS: ShopItem[] = [
-  {
-    id: "coin_tip",
-    label: "Tip jar",
-    blurb: "Fans chip in after a good session.",
-    coinCost: 0,
-    starCost: 1,
-    kind: "boost_coins",
-    accent: "orange",
-  },
-  {
-    id: "skill_gel",
-    label: "Focus gel",
-    blurb: "+2 to a random position skill.",
-    coinCost: 80,
-    starCost: 0,
-    kind: "boost_skill",
-    skillGain: 2,
-    accent: "blue",
-  },
-  {
-    id: "power_snack",
-    label: "Power snack",
-    blurb: "+3 to a random position skill.",
-    coinCost: 0,
-    starCost: 3,
-    kind: "boost_skill",
-    skillGain: 3,
-    accent: "purple",
-  },
-  {
-    id: "unlock_mohawk",
-    label: "Mohawk unlock",
-    blurb: "Unlock the mohawk in Groom.",
-    coinCost: 0,
-    starCost: 15,
-    kind: "unlock_hair",
-    hairStyleId: "mohawk",
-    accent: "green",
-  },
-  {
-    id: "unlock_long",
-    label: "Long hair unlock",
-    blurb: "Unlock shoulder-length hair in Groom.",
-    coinCost: 0,
-    starCost: 20,
-    kind: "unlock_hair",
-    hairStyleId: "shoulder_length",
-    accent: "blue",
-  },
-];
+export const SHOP_ITEMS: ShopItem[] = GEAR_SHOP_ITEMS;
 
 export type SpaItem = {
   id: string;

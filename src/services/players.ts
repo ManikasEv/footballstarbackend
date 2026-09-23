@@ -25,6 +25,7 @@ import {
   computePlayingStrength,
   skillsAfterPositionChange,
 } from "../game/constants.js";
+import { applyGearBonusesToSkills } from "../game/gearCatalog.js";
 import { AppError } from "../middleware/error.js";
 import type {
   CreatePlayerInput,
@@ -122,7 +123,12 @@ export async function getPlayerByUserId(
 
   // Recompute PS if skill set grew (new codes) or legacy 5-skill PS drifted
   const map = skillsToMap(skillRows);
-  const playingStrength = computePlayingStrength(player.position, map);
+  const appearance =
+    player.appearance && typeof player.appearance === "object"
+      ? (player.appearance as Record<string, unknown>)
+      : {};
+  const withGear = applyGearBonusesToSkills(map, appearance.equipped);
+  const playingStrength = computePlayingStrength(player.position, withGear);
   let playerRow = refreshed;
   if (playingStrength !== refreshed.playingStrength) {
     const [updated] = await db
