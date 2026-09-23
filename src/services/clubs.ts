@@ -36,6 +36,14 @@ function normalizeClubKit(kit: ClubKit | null | undefined): ClubKit {
       base.shirtSecondary ||
       base.badgeSecondary ||
       DEFAULT_CLUB_KIT.shirtSecondary,
+    shortsColour:
+      base.shortsColour ||
+      DEFAULT_CLUB_KIT.shortsColour ||
+      "#ffffff",
+    socksColour:
+      base.socksColour || DEFAULT_CLUB_KIT.socksColour || "#ffffff",
+    shirtDesign: base.shirtDesign ?? null,
+    badgeDesign: base.badgeDesign ?? null,
   };
 }
 
@@ -436,6 +444,76 @@ export async function leavePlayerClub(userId: string): Promise<PlayerPublic> {
   const pub = await getPlayerByUserId(userId);
   if (!pub) throw new AppError(404, "Player not found", "PLAYER_NOT_FOUND");
   return pub;
+}
+
+/** Owner sets which squad members start (max 11). Humans always stay eligible. */
+export async function setClubLineup(
+  userId: string,
+  starterIds: string[],
+): Promise<{ squad: SquadMemberPublic[] }> {
+  const player = await db.query.players.findFirst({
+    where: eq(players.userId, userId),
+  });
+  if (!player) throw new AppError(404, "Player not found", "PLAYER_NOT_FOUND");
+
+  const membership = await db.query.clubMemberships.findFirst({
+    where: eq(clubMemberships.playerId, player.id),
+    with: { club: true },
+  });
+  if (!membership?.club) {
+    throw new AppError(400, "Not in a club", "NOT_IN_CLUB");
+  }
+  if (membership.role !== "owner") {
+    throw new AppError(403, "Only the owner can change the lineup", "NOT_OWNER");
+  }
+
+  const unique = [...new Set(starterIds)].slice(0, 11);
+  const bots = await db.query.botPlayers.findMany({
+    where: eq(botPlayers.clubId, membership.club.id),
+  });
+  const botIds = new Set(bots.map((b) => b.id));
+  const humanIds = new Set(
+    (
+      await db.query.clubMemberships.findMany({
+        where: eq(clubMemberships.clubId, membership.club.id),
+      })
+    ).map((m) => m.playerId),
+  );
+
+  for (const id of unique) {
+    if (!botIds.has(id) && !humanIds.has(id)) {
+      throw new AppError(400, "Unknown squad member", "BAD_STARTER");
+    }
+  }
+
+  // Humans in the club are always treated as starters when listed; bots flip isStarter.
+  for (const bot of bots) {
+    const on = unique.includes(bot.id) ? 1 : 0;
+    if (bot.isStarter !== on) {
+      await db
+        .update(botPlayers)
+        .set({ isStarter: on })
+        .where(eq(botPlayers.id, bot.id));
+    }
+  }
+
+  // Ensure we still have 11 starters — promote bots if short
+  const pack = await getMySquad(userId);
+  const starterNow = pack.squad.filter((s) => s.isStarter);
+  if (starterNow.length < 11) {
+    const need = 11 - starterNow.length;
+    const promote = pack.squad
+      .filter((s) => !s.isStarter && s.kind === "bot")
+      .slice(0, need);
+    for (const p of promote) {
+      await db
+        .update(botPlayers)
+        .set({ isStarter: 1 })
+        .where(eq(botPlayers.id, p.id));
+    }
+  }
+
+  return getMySquad(userId);
 }
 
 export type { Club };

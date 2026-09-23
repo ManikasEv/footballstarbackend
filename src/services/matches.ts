@@ -153,6 +153,24 @@ async function loadClubSquad(
     side: a.side,
   }));
 
+  const starterIds = new Set(pub.map((p) => p.id));
+  const benchBots = bots.filter((b) => !starterIds.has(b.id)).slice(0, 11);
+  for (const [i, b] of benchBots.entries()) {
+    pub.push({
+      id: b.id,
+      name: b.displayName,
+      slot: b.slot,
+      position: b.position,
+      playingStrength: b.playingStrength,
+      isStarter: false,
+      kind: "bot",
+      appearance: asAppearance(b.appearance, clubName, 20 + i, strip),
+      baseX: side === "home" ? 8 : 92,
+      baseY: 10 + i * 7,
+      side,
+    });
+  }
+
   return { actors, public: pub };
 }
 

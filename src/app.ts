@@ -34,7 +34,7 @@ export function createApp() {
       credentials: false,
     }),
   );
-  app.use(express.json({ limit: "100kb" }));
+  app.use(express.json({ limit: "1mb" }));
 
   app.get("/", (_req, res) => {
     res.json({

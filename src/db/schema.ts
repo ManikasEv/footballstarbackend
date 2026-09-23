@@ -181,12 +181,18 @@ export type PlayerAppearance = {
   shirtSecondary?: string;
   shortsColourId?: string;
   socksColourId?: string;
+  /** Free dye for shorts / socks (hex) */
+  shortsColour?: string;
+  socksColour?: string;
   bootsColourId?: string;
   kitId?: string;
   badgeStyle?: "shield" | "circle" | "diamond";
   badgePrimary?: string;
   badgeSecondary?: string;
   badgeInitials?: string;
+  /** Custom shirt / crest textures (data URLs) */
+  shirtDesign?: string | null;
+  badgeDesign?: string | null;
   /** Legacy mirrors */
   skinColour: string;
   hairColour: string;
@@ -202,12 +208,22 @@ export type ClubKit = {
   shirtPrimary: string;
   /** Secondary jersey dye for stripes / accents (hex) */
   shirtSecondary: string;
+  /** @deprecated prefer shortsColour hex */
   shortsColourId: string;
+  /** @deprecated prefer socksColour hex */
   socksColourId: string;
+  /** Free shorts dye (hex) */
+  shortsColour?: string;
+  /** Free socks dye (hex) */
+  socksColour?: string;
   badgeStyle: "shield" | "circle" | "diamond";
   badgePrimary: string;
   badgeSecondary: string;
   badgeInitials: string;
+  /** Optional custom shirt texture (data URL) */
+  shirtDesign?: string | null;
+  /** Optional custom crest image (data URL) */
+  badgeDesign?: string | null;
 };
 
 export const DEFAULT_CLUB_KIT: ClubKit = {
@@ -216,10 +232,14 @@ export const DEFAULT_CLUB_KIT: ClubKit = {
   shirtSecondary: "#f0b429",
   shortsColourId: "colour-1",
   socksColourId: "colour-1",
+  shortsColour: "#ffffff",
+  socksColour: "#ffffff",
   badgeStyle: "shield",
   badgePrimary: "#1e4a8c",
   badgeSecondary: "#f0b429",
   badgeInitials: "FC",
+  shirtDesign: null,
+  badgeDesign: null,
 };
 
 export const players = pgTable(

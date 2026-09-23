@@ -8,6 +8,7 @@ import {
   joinPlayerClub,
   leavePlayerClub,
   listLeagueClubs,
+  setClubLineup,
 } from "../../services/clubs.js";
 import { LEAGUE_TIERS } from "../../game/clubCatalog.js";
 import {
@@ -36,7 +37,22 @@ clubsRouter.get("/me/squad", async (req, res, next) => {
   try {
     const { user } = (req as AuthenticatedRequest).auth;
     const data = await getMySquad(user.id);
-    res.json({ data });
+    res.json({ data: { ...data, formation: "4-4-2" } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const lineupBody = z.object({
+  starterIds: z.array(z.string().uuid()).min(1).max(11),
+});
+
+clubsRouter.post("/me/lineup", async (req, res, next) => {
+  try {
+    const { user } = (req as AuthenticatedRequest).auth;
+    const { starterIds } = lineupBody.parse(req.body);
+    const data = await setClubLineup(user.id, starterIds);
+    res.json({ data: { ...data, formation: "4-4-2" } });
   } catch (err) {
     next(err);
   }
@@ -116,26 +132,37 @@ clubsRouter.get("/leagues/:tier", async (req, res, next) => {
   }
 });
 
+const dataUrl = z
+  .string()
+  .max(180_000)
+  .refine(
+    (v) =>
+      v === "" ||
+      /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(v),
+    "Invalid image",
+  )
+  .optional()
+  .nullable();
+
 const createBody = z.object({
   name: z.string().trim().min(3).max(40),
   kit: z
     .object({
-      shirtPatternId: z.enum([
-        "home",
-        "solid",
-        "vertical",
-        "hoops",
-        "diagonal",
-        "halves",
-      ]),
-      shirtPrimary: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-      shirtSecondary: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-      shortsColourId: z.string().regex(/^colour-[1-5]$/),
-      socksColourId: z.string().regex(/^colour-[1-5]$/),
-      badgeStyle: z.enum(["shield", "circle", "diamond"]),
-      badgePrimary: z.string().min(4).max(20),
-      badgeSecondary: z.string().min(4).max(20),
-      badgeInitials: z.string().trim().min(1).max(3),
+      shirtPatternId: z
+        .enum(["home", "solid", "vertical", "hoops", "diagonal", "halves"])
+        .optional(),
+      shirtPrimary: z.string().optional(),
+      shirtSecondary: z.string().optional(),
+      shortsColourId: z.string().optional(),
+      socksColourId: z.string().optional(),
+      shortsColour: z.string().optional(),
+      socksColour: z.string().optional(),
+      badgeStyle: z.enum(["shield", "circle", "diamond"]).optional(),
+      badgePrimary: z.string().optional(),
+      badgeSecondary: z.string().optional(),
+      badgeInitials: z.string().optional(),
+      shirtDesign: dataUrl,
+      badgeDesign: dataUrl,
     })
     .optional(),
 });
@@ -143,8 +170,34 @@ const createBody = z.object({
 clubsRouter.post("/", async (req, res, next) => {
   try {
     const { user } = (req as AuthenticatedRequest).auth;
-    const { name, kit } = createBody.parse(req.body);
-    const result = await createPlayerClub(user.id, name, kit);
+    const body = createBody.parse(req.body);
+    const hex = (v: string | undefined, fallback: string) =>
+      v && /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : fallback;
+    const colour = (v: string | undefined, fallback: string) =>
+      v && /^colour-[1-5]$/.test(v) ? v : fallback;
+    const design = (v: string | null | undefined) =>
+      v && v.startsWith("data:image/") ? v : null;
+    const kit = body.kit
+      ? {
+          shirtPatternId: body.kit.shirtPatternId ?? "vertical",
+          shirtPrimary: hex(body.kit.shirtPrimary, "#1e4a8c"),
+          shirtSecondary: hex(body.kit.shirtSecondary, "#f0b429"),
+          shortsColourId: colour(body.kit.shortsColourId, "colour-1"),
+          socksColourId: colour(body.kit.socksColourId, "colour-1"),
+          shortsColour: hex(body.kit.shortsColour, "#ffffff"),
+          socksColour: hex(body.kit.socksColour, "#ffffff"),
+          badgeStyle: body.kit.badgeStyle ?? "shield",
+          badgePrimary: hex(body.kit.badgePrimary, "#1e4a8c"),
+          badgeSecondary: hex(body.kit.badgeSecondary, "#f0b429"),
+          badgeInitials: (body.kit.badgeInitials ?? "FC")
+            .replace(/[^a-zA-Z0-9]/g, "")
+            .slice(0, 3)
+            .toUpperCase() || "FC",
+          shirtDesign: design(body.kit.shirtDesign),
+          badgeDesign: design(body.kit.badgeDesign),
+        }
+      : undefined;
+    const result = await createPlayerClub(user.id, body.name, kit);
     res.status(201).json({ data: result });
   } catch (err) {
     next(err);

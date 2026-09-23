@@ -38,9 +38,13 @@ export function errorHandler(
   }
 
   if (err instanceof ZodError) {
+    const first =
+      err.issues[0]?.message ??
+      err.issues[0]?.path?.join(".") ??
+      "Invalid input";
     res.status(400).json({
       error: {
-        message: "Validation failed",
+        message: first,
         code: "VALIDATION_ERROR",
         details: err.flatten(),
       },
