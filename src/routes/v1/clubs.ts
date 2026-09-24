@@ -9,6 +9,7 @@ import {
   leavePlayerClub,
   listLeagueClubs,
   setClubLineup,
+  swapSquadMembers,
 } from "../../services/clubs.js";
 import { LEAGUE_TIERS } from "../../game/clubCatalog.js";
 import {
@@ -52,6 +53,22 @@ clubsRouter.post("/me/lineup", async (req, res, next) => {
     const { user } = (req as AuthenticatedRequest).auth;
     const { starterIds } = lineupBody.parse(req.body);
     const data = await setClubLineup(user.id, starterIds);
+    res.json({ data: { ...data, formation: "4-4-2" } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const swapBody = z.object({
+  aId: z.string().uuid(),
+  bId: z.string().uuid(),
+});
+
+clubsRouter.post("/me/squad/swap", async (req, res, next) => {
+  try {
+    const { user } = (req as AuthenticatedRequest).auth;
+    const { aId, bId } = swapBody.parse(req.body);
+    const data = await swapSquadMembers(user.id, aId, bId);
     res.json({ data: { ...data, formation: "4-4-2" } });
   } catch (err) {
     next(err);

@@ -9,7 +9,9 @@ import {
   type Club,
   type ClubKit,
   type LeagueTier,
+  type Player,
   type PlayerAppearance,
+  type PlayerPosition,
   DEFAULT_CLUB_KIT,
 } from "../db/schema.js";
 import { getOpenWorldOrThrow } from "../game/bootstrap.js";
@@ -77,6 +79,8 @@ export type ClubPublic = {
   botCount: number;
   humanCount: number;
   squadCap: number;
+  fans: number;
+  rankingPoints: number;
   kit: ClubKit;
 };
 
@@ -101,6 +105,8 @@ async function clubPublicFrom(
     botCount: botCount[0]?.n ?? 0,
     humanCount: humanCount[0]?.n ?? 0,
     squadCap: MAX_SQUAD_SIZE,
+    fans: club.fans ?? 0,
+    rankingPoints: club.rankingPoints ?? 0,
     kit: normalizeClubKit(club.kit),
   };
 }
@@ -168,14 +174,28 @@ export async function getMySquad(userId: string): Promise<{
       where: eq(players.id, m.playerId),
     });
     if (!p) continue;
+    const appearance = p.appearance as Record<string, unknown>;
+    const savedSlot =
+      typeof appearance.clubPitchSlot === "string"
+        ? appearance.clubPitchSlot
+        : null;
     const slotPrefer =
-      p.position === "goalkeeper"
-        ? "gk"
-        : p.position === "defender"
-          ? "cb"
-          : p.position === "midfielder"
-            ? "cm"
-            : "st";
+      savedSlot === "gk" ||
+      savedSlot === "lb" ||
+      savedSlot === "cb" ||
+      savedSlot === "rb" ||
+      savedSlot === "lm" ||
+      savedSlot === "cm" ||
+      savedSlot === "rm" ||
+      savedSlot === "st"
+        ? savedSlot
+        : p.position === "goalkeeper"
+          ? "gk"
+          : p.position === "defender"
+            ? "cb"
+            : p.position === "midfielder"
+              ? "cm"
+              : "st";
     squad.push({
       id: p.id,
       name: p.displayName,
@@ -511,6 +531,119 @@ export async function setClubLineup(
         .set({ isStarter: 1 })
         .where(eq(botPlayers.id, p.id));
     }
+  }
+
+  return getMySquad(userId);
+}
+
+const PITCH_SLOTS = new Set([
+  "gk",
+  "lb",
+  "cb",
+  "rb",
+  "lm",
+  "cm",
+  "rm",
+  "st",
+]);
+
+type SquadSlotCode =
+  | "gk"
+  | "lb"
+  | "cb"
+  | "rb"
+  | "lm"
+  | "cm"
+  | "rm"
+  | "st";
+
+function slotToPosition(slot: SquadSlotCode): PlayerPosition {
+  if (slot === "gk") return "goalkeeper";
+  if (slot === "lb" || slot === "cb" || slot === "rb") return "defender";
+  if (slot === "lm" || slot === "cm" || slot === "rm") return "midfielder";
+  return "striker";
+}
+
+/** Owner swaps two squad members' pitch slots (and starter flag if needed). */
+export async function swapSquadMembers(
+  userId: string,
+  aId: string,
+  bId: string,
+): Promise<{ squad: SquadMemberPublic[] }> {
+  if (aId === bId) {
+    throw new AppError(400, "Pick two different players", "BAD_SWAP");
+  }
+  const player = await db.query.players.findFirst({
+    where: eq(players.userId, userId),
+  });
+  if (!player) throw new AppError(404, "Player not found", "PLAYER_NOT_FOUND");
+
+  const membership = await db.query.clubMemberships.findFirst({
+    where: eq(clubMemberships.playerId, player.id),
+    with: { club: true },
+  });
+  if (!membership?.club) {
+    throw new AppError(400, "Not in a club", "NOT_IN_CLUB");
+  }
+  if (membership.role !== "owner") {
+    throw new AppError(403, "Only the owner can change the lineup", "NOT_OWNER");
+  }
+
+  const pack = await getMySquad(userId);
+  const a = pack.squad.find((s) => s.id === aId);
+  const b = pack.squad.find((s) => s.id === bId);
+  if (!a || !b) {
+    throw new AppError(400, "Unknown squad member", "BAD_SWAP");
+  }
+
+  const aSlot = a.slot as SquadSlotCode;
+  const bSlot = b.slot as SquadSlotCode;
+  if (!PITCH_SLOTS.has(aSlot) || !PITCH_SLOTS.has(bSlot)) {
+    throw new AppError(400, "Invalid pitch slot", "BAD_SLOT");
+  }
+
+  async function writeMember(
+    member: SquadMemberPublic,
+    slot: SquadSlotCode,
+    isStarter: boolean,
+  ) {
+    if (member.kind === "bot") {
+      await db
+        .update(botPlayers)
+        .set({
+          slot,
+          position: slotToPosition(slot),
+          isStarter: isStarter ? 1 : 0,
+        })
+        .where(eq(botPlayers.id, member.id));
+      return;
+    }
+    const row = await db.query.players.findFirst({
+      where: eq(players.id, member.id),
+    });
+    if (!row) return;
+    const appearance = {
+      ...((row.appearance && typeof row.appearance === "object"
+        ? row.appearance
+        : {}) as Record<string, unknown>),
+      clubPitchSlot: slot,
+    };
+    await db
+      .update(players)
+      .set({
+        appearance: appearance as unknown as Player["appearance"],
+        updatedAt: new Date(),
+      })
+      .where(eq(players.id, member.id));
+  }
+
+  // Swap pitch slots. Bot↔bot also swaps XI/bench. Humans always stay in the XI.
+  if (a.kind === "bot" && b.kind === "bot") {
+    await writeMember(a, bSlot, b.isStarter);
+    await writeMember(b, aSlot, a.isStarter);
+  } else {
+    await writeMember(a, bSlot, a.kind === "human" ? true : a.isStarter);
+    await writeMember(b, aSlot, b.kind === "human" ? true : b.isStarter);
   }
 
   return getMySquad(userId);

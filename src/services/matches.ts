@@ -18,6 +18,11 @@ import {
   applyKitToAppearance,
   botAppearanceFor,
 } from "../game/clubCatalog.js";
+import {
+  clubRewardScale,
+  homeCrowdFameBonus,
+  matchClubAwards,
+} from "../game/clubPrestige.js";
 import { matchFameFromStats } from "../game/fameCatalog.js";
 import { TIREDNESS_MAX, tirednessFromMatch } from "../game/constants.js";
 import {
@@ -305,6 +310,51 @@ async function humansOnClub(clubId: string) {
   return out;
 }
 
+async function awardClubPrestige(opts: {
+  homeClubId: string;
+  awayClubId: string;
+  homeScore: number;
+  awayScore: number;
+  competition: string;
+}) {
+  const homeResult =
+    opts.homeScore > opts.awayScore
+      ? "win"
+      : opts.homeScore === opts.awayScore
+        ? "draw"
+        : "loss";
+  const awayResult =
+    homeResult === "win" ? "loss" : homeResult === "loss" ? "win" : "draw";
+
+  const homeAward = matchClubAwards({
+    result: homeResult,
+    isHome: true,
+    competition: opts.competition,
+  });
+  const awayAward = matchClubAwards({
+    result: awayResult,
+    isHome: false,
+    competition: opts.competition,
+  });
+
+  await db
+    .update(clubs)
+    .set({
+      fans: sql`${clubs.fans} + ${homeAward.fans}`,
+      rankingPoints: sql`${clubs.rankingPoints} + ${homeAward.rankingPoints}`,
+    })
+    .where(eq(clubs.id, opts.homeClubId));
+  await db
+    .update(clubs)
+    .set({
+      fans: sql`${clubs.fans} + ${awayAward.fans}`,
+      rankingPoints: sql`${clubs.rankingPoints} + ${awayAward.rankingPoints}`,
+    })
+    .where(eq(clubs.id, opts.awayClubId));
+
+  return { home: homeAward, away: awayAward };
+}
+
 async function awardMatchFame(opts: {
   matchId: string;
   fixtureId: string | null;
@@ -314,6 +364,10 @@ async function awardMatchFame(opts: {
   awayClubId: string;
   homeScore: number;
   awayScore: number;
+  homeFans: number;
+  homeRankingPoints: number;
+  awayFans: number;
+  awayRankingPoints: number;
   actorStats: Array<{
     id: string;
     minutes: number;
@@ -338,8 +392,14 @@ async function awardMatchFame(opts: {
         : opts.awayScore > opts.homeScore;
     const teamDraw = opts.homeScore === opts.awayScore;
     const teamResult = teamWon ? "win" : teamDraw ? "draw" : "loss";
+    const isHome = stat.side === "home";
+    const fans = isHome ? opts.homeFans : opts.awayFans;
+    const rankingPoints = isHome
+      ? opts.homeRankingPoints
+      : opts.awayRankingPoints;
+    const scale = clubRewardScale(fans, rankingPoints);
 
-    const fame = matchFameFromStats({
+    const baseFame = matchFameFromStats({
       rating: stat.rating,
       goals: stat.goals,
       assists: stat.assists,
@@ -347,6 +407,8 @@ async function awardMatchFame(opts: {
       wasSub: stat.wasSub && !stat.wasStarter,
       minutes: stat.minutes,
     });
+    const crowdBonus = homeCrowdFameBonus(opts.homeFans, isHome, teamWon);
+    const fame = Math.max(0, Math.round(baseFame * scale) + crowdBonus);
     if (fame <= 0) continue;
 
     await db.insert(playerMatchStats).values({
@@ -354,7 +416,7 @@ async function awardMatchFame(opts: {
       fixtureId: opts.fixtureId,
       seasonId: opts.seasonId,
       playerId: stat.id,
-      clubId: stat.side === "home" ? opts.homeClubId : opts.awayClubId,
+      clubId: isHome ? opts.homeClubId : opts.awayClubId,
       competition: opts.competition,
       minutes: stat.minutes,
       goals: stat.goals,
@@ -384,7 +446,7 @@ async function awardMatchFame(opts: {
           .values({
             seasonId: opts.seasonId,
             playerId: stat.id,
-            clubId: stat.side === "home" ? opts.homeClubId : opts.awayClubId,
+            clubId: isHome ? opts.homeClubId : opts.awayClubId,
           })
           .returning();
         seasonRow = created!;
@@ -519,8 +581,20 @@ export async function playFixture(userId: string, fixtureId: string) {
     awayClubId: awayClub.id,
     homeScore: sim.homeScore,
     awayScore: sim.awayScore,
+    homeFans: homeClub.fans ?? 0,
+    homeRankingPoints: homeClub.rankingPoints ?? 0,
+    awayFans: awayClub.fans ?? 0,
+    awayRankingPoints: awayClub.rankingPoints ?? 0,
     actorStats: sim.actorStats,
     kindById,
+  });
+
+  await awardClubPrestige({
+    homeClubId: homeClub.id,
+    awayClubId: awayClub.id,
+    homeScore: sim.homeScore,
+    awayScore: sim.awayScore,
+    competition: fixture.competition,
   });
 
   // Humans who played pick up tiredness (test matches skip this path)

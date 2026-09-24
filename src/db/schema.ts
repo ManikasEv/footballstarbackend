@@ -453,6 +453,10 @@ export const clubs = pgTable(
     isSystem: integer("is_system").notNull().default(0),
     /** Shared jersey + badge for the whole squad. */
     kit: jsonb("kit").$type<ClubKit>().notNull().default(DEFAULT_CLUB_KIT),
+    /** Crowd following the club — grows with wins; boosts rewards. */
+    fans: integer("fans").notNull().default(0),
+    /** Global ranking points — separate from league table pts. */
+    rankingPoints: integer("ranking_points").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -460,6 +464,7 @@ export const clubs = pgTable(
   (table) => [
     index("clubs_world_id_idx").on(table.worldId),
     index("clubs_tier_idx").on(table.tier),
+    index("clubs_ranking_points_idx").on(table.rankingPoints),
     uniqueIndex("clubs_world_name_uidx").on(table.worldId, table.name),
   ],
 );

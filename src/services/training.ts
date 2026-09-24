@@ -2,6 +2,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   auditLogs,
+  clubMemberships,
   playerSkillValues,
   playerTrainingChain,
   players,
@@ -13,6 +14,9 @@ import {
   type TrainingOfferKind,
   type TrainingSession,
 } from "../db/schema.js";
+import {
+  clubRewardScale,
+} from "../game/clubPrestige.js";
 import {
   ALL_SKILL_CODES,
   POSITION_SKILLS,
@@ -99,6 +103,23 @@ function offersLookLegacy(offers: TrainingOffer[]) {
   return allSameDuration && offers[0].durationSeconds >= 500;
 }
 
+async function getPlayerClubPrestige(playerId: string) {
+  const membership = await db.query.clubMemberships.findFirst({
+    where: eq(clubMemberships.playerId, playerId),
+    with: { club: true },
+  });
+  if (!membership?.club) {
+    return { fans: 0, rankingPoints: 0, scale: 1 };
+  }
+  const fans = membership.club.fans ?? 0;
+  const rankingPoints = membership.club.rankingPoints ?? 0;
+  return {
+    fans,
+    rankingPoints,
+    scale: clubRewardScale(fans, rankingPoints),
+  };
+}
+
 async function ensureOffers(player: Player): Promise<TrainingOffer[]> {
   const existing = await db.query.trainingOffers.findMany({
     where: eq(trainingOffers.playerId, player.id),
@@ -110,6 +131,7 @@ async function ensureOffers(player: Player): Promise<TrainingOffer[]> {
   }
 
   await clearOffers(player.id);
+  const prestige = await getPlayerClubPrestige(player.id);
   const generated = generateTrainingOffers(player.position, player.fame);
   const inserted = await db
     .insert(trainingOffers)
@@ -120,8 +142,14 @@ async function ensureOffers(player: Player): Promise<TrainingOffer[]> {
         skillCode: o.skillCode,
         durationSeconds: o.durationSeconds,
         enduranceCost: o.enduranceCost,
-        coinReward: o.coinReward,
-        skillGain: o.skillGain,
+        coinReward: Math.max(
+          1,
+          Math.round(o.coinReward * prestige.scale),
+        ),
+        skillGain: Math.max(
+          1,
+          Math.round(o.skillGain * (1 + (prestige.scale - 1) * 0.5)),
+        ),
         sortOrder: o.sortOrder,
       })),
     )
